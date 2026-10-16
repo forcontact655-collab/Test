@@ -14,6 +14,7 @@
   };
   const HOLD_GAP = 180;
   const COLUMN = 0.24;
+  const NOTE_HALF = 0.1;
   const LINE_Y = 0.8;
   const LANES = [-0.33, 0, 0.33];
   const FRAME_MS = 10;
@@ -852,8 +853,8 @@
     }
 
     function drawNote(g, n, ms, geo, bh) {
-      const x0 = (n.lane - COLUMN) * geo.Lx;
-      const w = COLUMN * 2 * geo.Lx;
+      const x0 = (n.lane - NOTE_HALF) * geo.Lx;
+      const w = NOTE_HALF * 2 * geo.Lx;
       const fNow = floorOf(g, ms);
       const vHead = -n.side * (floorOf(g, n.time) - fNow) * 0.6 * H;
       if (n.type === "hold") {
