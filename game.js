@@ -14,7 +14,7 @@
   };
   const HOLD_GAP = 180;
   const COLUMN = 0.24;
-  const NOTE_HALF = 0.1;
+  const NOTE_HALF = 0.06;
   const LINE_Y = 0.8;
   const LANES = [-0.33, 0, 0.33];
   const FRAME_MS = 10;
