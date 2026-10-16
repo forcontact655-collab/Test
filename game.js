@@ -23,7 +23,7 @@
   const BASE_SPEED = 0.5;
   const STORE_KEY = "phigros-web-x-settings";
   const DEFAULTS = { track: "track", diff: "HD", flow: 1, offset: 0, sfx: true, rotation: true, autoplay: false };
-  const COLORS = { tap: "#36d6ff", drag: "#ffe45e", flick: "#ff4d8d", gold: "#ffe07d", blue: "#48e5ff" };
+  const COLORS = { tap: "#2fd3ff", drag: "#e6c24a", flick: "#ff3d6e", gold: "#ffe07d", blue: "#48e5ff" };
 
   function mulberry32(seed) {
     let a = seed >>> 0;
@@ -823,32 +823,53 @@
       endTick(g, ms);
     }
 
+    function drawChevrons(x0, w, v, bh, color) {
+      const h = bh * 0.55;
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2.5;
+      ctx.lineJoin = "round";
+      for (let k = 0; k < 2; k++) {
+        const tl = x0 - 4 - k * 6;
+        const tr = x0 + w + 4 + k * 6;
+        ctx.beginPath();
+        ctx.moveTo(tl + 5, v - h);
+        ctx.lineTo(tl, v);
+        ctx.lineTo(tl + 5, v + h);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(tr - 5, v - h);
+        ctx.lineTo(tr, v);
+        ctx.lineTo(tr - 5, v + h);
+        ctx.stroke();
+      }
+    }
+
     function drawBar(n, x0, w, v, kind, bh) {
       const color = kind === "drag" ? COLORS.drag : kind === "flick" ? COLORS.flick : COLORS.tap;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(x0 - 2, v - bh / 2 - 2, w + 4, bh + 4);
       ctx.fillStyle = color;
+      ctx.fillRect(x0, v - bh / 2, w, bh);
       if (kind === "flick") {
         const mx = x0 + w / 2;
-        const r = bh * 0.9;
-        ctx.fillRect(x0, v - bh / 2, w, bh);
+        const r = bh * 0.85;
         ctx.fillStyle = "#ffffff";
         ctx.beginPath();
         ctx.moveTo(mx, v - r);
-        ctx.lineTo(mx + r * 0.8, v);
+        ctx.lineTo(mx + r * 0.7, v);
         ctx.lineTo(mx, v + r);
-        ctx.lineTo(mx - r * 0.8, v);
+        ctx.lineTo(mx - r * 0.7, v);
         ctx.closePath();
         ctx.fill();
-      } else {
-        ctx.fillRect(x0, v - bh / 2, w, bh);
-        if (kind === "tap") {
-          ctx.fillStyle = "#ffffff";
-          ctx.fillRect(x0 + 6, v - 1.5, w - 12, 3);
-        }
+      } else if (kind === "tap") {
+        ctx.fillStyle = "rgba(255,255,255,0.75)";
+        ctx.fillRect(x0 + 6, v - 1.5, w - 12, 3);
       }
+      if (kind !== "flick") drawChevrons(x0, w, v, bh, color);
       if (n.chord) {
         ctx.strokeStyle = COLORS.gold;
         ctx.lineWidth = 2;
-        ctx.strokeRect(x0 - 3, v - bh / 2 - 3, w + 6, bh + 6);
+        ctx.strokeRect(x0 - 6, v - bh / 2 - 6, w + 12, bh + 12);
       }
     }
 
@@ -862,10 +883,14 @@
         const a = n.state === "active" ? 0 : vHead;
         const top = Math.min(a, vTail);
         const bot = Math.max(a, vTail);
-        ctx.globalAlpha = 0.35;
-        ctx.fillStyle = COLORS.tap;
+        const grad = ctx.createLinearGradient(0, top, 0, bot);
+        grad.addColorStop(0, "rgba(160,235,255,0.12)");
+        grad.addColorStop(1, "rgba(160,235,255,0.8)");
+        ctx.fillStyle = grad;
         ctx.fillRect(x0, top, w, Math.max(1, bot - top));
-        ctx.globalAlpha = 1;
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2.5;
+        ctx.strokeRect(x0, top, w, Math.max(1, bot - top));
         if (n.state === "wait") drawBar(n, x0, w, vHead, "tap", bh);
         return;
       }

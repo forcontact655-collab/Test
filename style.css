@@ -13,7 +13,7 @@ body.playing #hud{display:block}
 #combo-label{font-size:12px;letter-spacing:4px;color:#bfc7ff}
 #score{position:absolute;right:14px;top:12px;font-variant-numeric:tabular-nums;font-size:24px;font-weight:700;color:#fff}
 #track-name{position:absolute;left:14px;bottom:12px;font-size:14px;color:#d8d8f0}
-#diff-name{position:absolute;right:14px;bottom:12px;font-size:14px;color:#ffe07d;font-weight:700}
+#diff-name{position:absolute;right:14px;bottom:12px;font-size:14px;color:#ececff;font-weight:600}
 .screen{position:fixed;inset:0;display:flex;padding:16px;overflow-y:auto;background:radial-gradient(circle at 50% 30%,#241c44,#0c0b18 70%)}
 #pause{background:rgba(8,7,16,.72)}
 .panel{margin:auto;width:100%;max-width:420px;background:rgba(255,255,255,.05);border:1px solid rgba(180,140,255,.25);border-radius:20px;padding:20px;backdrop-filter:blur(8px)}
