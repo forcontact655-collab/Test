@@ -20,47 +20,67 @@
   </div>
 
   <section id="menu" class="screen">
-    <div class="panel">
-      <h1>Phigros Web</h1>
-      <p class="sub">X-Edition</p>
-
-      <div class="block">
-        <div class="label">Трек</div>
-        <div class="row">
-          <button class="track-btn chip" type="button" data-track="track">Somewhat_empty — Track</button>
-          <button class="track-btn chip" type="button" data-track="chrono">Chronostasis — 160 BPM</button>
-          <button id="custom-btn" class="chip" type="button">Свой аудиофайл…</button>
+    <div class="m-wrap">
+      <aside class="m-list">
+        <div class="m-brand">
+          <div class="m-title">Phigros Web</div>
+          <div class="m-sub">X-Edition</div>
+        </div>
+        <div class="m-tracks">
+          <button class="track-btn m-track" type="button" data-track="track">
+            <img src="assets/cover-track.jpg" alt="">
+            <span><b>Somewhat_empty</b><small>Track</small></span>
+          </button>
+          <button class="track-btn m-track" type="button" data-track="chrono">
+            <img src="assets/cover-chrono.jpg" alt="">
+            <span><b>Chronostasis</b><small>160 BPM</small></span>
+          </button>
+          <button id="custom-btn" class="m-track m-custom" type="button">
+            <span class="m-plus">+</span>
+            <span><b id="custom-name">Свой файл…</b><small>mp3 · ogg · m4a · wav</small></span>
+          </button>
           <input id="file" type="file" accept="audio/mpeg,audio/mp4,audio/x-m4a,audio/ogg,audio/wav,audio/flac,audio/aac,.m4a,.mp3,.ogg,.wav,.flac" hidden>
         </div>
-      </div>
+      </aside>
 
-      <div class="block">
-        <div class="label">Сложность</div>
-        <div class="row">
-          <button class="diff-btn chip" type="button" data-diff="EZ">EZ Lv.6</button>
-          <button class="diff-btn chip" type="button" data-diff="HD">HD Lv.11</button>
-          <button class="diff-btn chip" type="button" data-diff="IN14">IN Lv.14</button>
-          <button class="diff-btn chip" type="button" data-diff="IN15">IN Lv.15</button>
+      <main class="m-main">
+        <div class="m-card">
+          <img id="menu-cover" alt="">
+          <div class="m-card-info">
+            <div id="menu-trackname" class="m-name"></div>
+            <div id="menu-best" class="m-best"></div>
+          </div>
         </div>
-      </div>
+        <div class="m-diffs">
+          <button class="diff-btn" type="button" data-diff="EZ"><b>6</b><span>EZ</span></button>
+          <button class="diff-btn" type="button" data-diff="HD"><b>11</b><span>HD</span></button>
+          <button class="diff-btn" type="button" data-diff="IN14"><b>14</b><span>IN</span></button>
+          <button class="diff-btn" type="button" data-diff="IN15"><b>15</b><span>IN</span></button>
+        </div>
+        <div class="m-actions">
+          <button id="settings-btn" class="m-ghost" type="button">Настройки</button>
+          <button id="play-btn" class="m-play" type="button">Играть</button>
+        </div>
+        <div id="status"></div>
+      </main>
 
-      <div class="block">
+      <aside id="settings" class="m-settings">
+        <div class="m-set-head">
+          <span>Настройки</span>
+          <button id="settings-close" class="m-ghost" type="button">Готово</button>
+        </div>
         <label class="slider">Скорость нот <span id="flow-val"></span>
           <input id="flow" type="range" min="0.6" max="1.8" step="0.1">
         </label>
         <label class="slider">Задержка звука <span id="offset-val"></span>
           <input id="offset" type="range" min="-150" max="150" step="5">
         </label>
-      </div>
-
-      <div class="block toggles">
-        <label><input id="sfx" type="checkbox"> Звук ударов</label>
-        <label><input id="rotation" type="checkbox"> Вращение линии</label>
-        <label><input id="autoplay" type="checkbox"> AutoPlay (φ Демо)</label>
-      </div>
-
-      <button id="play-btn" class="play" type="button">Играть</button>
-      <div id="status"></div>
+        <div class="toggles">
+          <label><input id="sfx" type="checkbox"> Звук ударов</label>
+          <label><input id="rotation" type="checkbox"> Вращение линии</label>
+          <label><input id="autoplay" type="checkbox"> AutoPlay (φ Демо)</label>
+        </div>
+      </aside>
     </div>
   </section>
 
@@ -74,22 +94,35 @@
   </section>
 
   <section id="result" class="screen hidden">
-    <div class="panel">
-      <div id="res-track" class="sub"></div>
-      <div id="res-rank">F</div>
-      <div id="res-score">0000000</div>
-      <div class="grid">
-        <div>Accuracy</div><div id="res-acc">0.00%</div>
-        <div>Max Combo</div><div id="res-combo">0</div>
-        <div>Perfect</div><div id="res-p">0</div>
-        <div>Good</div><div id="res-g">0</div>
-        <div>Bad</div><div id="res-b">0</div>
-        <div>Miss</div><div id="res-m">0</div>
-        <div>Early</div><div id="res-early">0</div>
-        <div>Late</div><div id="res-late">0</div>
+    <div class="r-wrap">
+      <div class="r-left">
+        <img id="res-cover" alt="">
+        <div id="res-track" class="r-track"></div>
       </div>
-      <button id="res-replay" class="play" type="button">Переиграть</button>
-      <button id="res-menu" class="chip wide" type="button">В меню</button>
+      <div class="r-right">
+        <div class="r-top">
+          <div id="res-rank">F</div>
+          <div class="r-score-box">
+            <div id="res-score">0000000</div>
+            <div id="res-newbest" class="r-newbest"></div>
+          </div>
+        </div>
+        <div class="r-stats">
+          <div class="r-stat"><span>Accuracy</span><b id="res-acc">0.00%</b></div>
+          <div class="r-stat"><span>Max Combo</span><b id="res-combo">0</b></div>
+        </div>
+        <div class="r-judge">
+          <div><span>Perfect</span><b id="res-p">0</b></div>
+          <div><span>Good</span><b id="res-g">0</b></div>
+          <div><span>Bad</span><b id="res-b">0</b></div>
+          <div><span>Miss</span><b id="res-m">0</b></div>
+        </div>
+        <div class="r-el"><span>Early <b id="res-early">0</b></span><span>Late <b id="res-late">0</b></span></div>
+        <div class="r-actions">
+          <button id="res-menu" class="m-ghost" type="button">В меню</button>
+          <button id="res-replay" class="m-play" type="button">Переиграть</button>
+        </div>
+      </div>
     </div>
   </section>
 
