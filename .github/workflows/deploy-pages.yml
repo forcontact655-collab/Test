@@ -37,13 +37,13 @@ jobs:
 
       - name: Collect web files
         run: |
-          mkdir -p "$RUNNER_TEMP/app/www"
-          cp index.html style.css game.js track.m4a "$RUNNER_TEMP/app/www/"
-          cp -r assets "$RUNNER_TEMP/app/www/"
+          mkdir -p "$RUNNER_TEMP/app/www/assets"
+          cp index.html style.css game.js "$RUNNER_TEMP/app/www/"
+          cp assets/city-bg.jpg "$RUNNER_TEMP/app/www/assets/"
           cat > "$RUNNER_TEMP/app/capacitor.config.json" <<'EOF'
           {
-            "appId": "com.forcontact655.test",
-            "appName": "Test",
+            "appId": "com.forcontact655.pulseflip",
+            "appName": "Pulse Flip",
             "webDir": "www"
           }
           EOF
@@ -76,8 +76,7 @@ jobs:
           grep -q 'assets/public/index.html' apk-list.txt
           grep -q 'assets/public/game.js' apk-list.txt
           grep -q 'assets/public/style.css' apk-list.txt
-          grep -q 'assets/public/track.m4a' apk-list.txt
-          grep -q 'assets/public/assets/bg.jpg' apk-list.txt
+          grep -q 'assets/public/assets/city-bg.jpg' apk-list.txt
           if grep -qi '\.pez' apk-list.txt; then exit 1; fi
           grep -q 'META-INF/' apk-list.txt
           ls -la "$apk"
@@ -85,13 +84,13 @@ jobs:
       - name: Prepare APK file
         run: |
           mkdir -p "$RUNNER_TEMP/out"
-          cp "$RUNNER_TEMP/app/android/app/build/outputs/apk/debug/app-debug.apk" "$RUNNER_TEMP/out/test-game-debug.apk"
+          cp "$RUNNER_TEMP/app/android/app/build/outputs/apk/debug/app-debug.apk" "$RUNNER_TEMP/out/pulse-flip.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: test-game-debug
-          path: ${{ runner.temp }}/out/test-game-debug.apk
+          name: pulse-flip-debug
+          path: ${{ runner.temp }}/out/pulse-flip.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -100,8 +99,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete apk-latest --cleanup-tag --yes || true
-          gh release create apk-latest "$RUNNER_TEMP/out/test-game-debug.apk" \
-            --title "Test APK (последняя сборка)" \
+          gh release create apk-latest "$RUNNER_TEMP/out/pulse-flip.apk" \
+            --title "Pulse Flip APK (последняя сборка)" \
             --notes "Сборка из коммита ${GITHUB_SHA:0:7} (${GITHUB_REF_NAME}). Обновляется при каждом пуше в ветки arena." \
             --prerelease \
             --target "$GITHUB_SHA"
@@ -119,8 +118,15 @@ jobs:
       - name: Download APK
         uses: actions/download-artifact@v4
         with:
-          name: test-game-debug
+          name: pulse-flip-debug
           path: download
+
+      - name: Assemble site
+        run: |
+          mkdir -p site/assets
+          cp index.html style.css game.js site/
+          cp assets/city-bg.jpg site/assets/
+          cp -r download site/download
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -128,7 +134,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: '.'
+          path: site
 
       - name: Deploy to GitHub Pages
         id: deployment

@@ -2,138 +2,65 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#0c0b18">
-  <title>Phigros Web · X-Edition</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0b0620">
+  <title>Pulse Flip</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <canvas id="game"></canvas>
+  <div id="app">
+    <canvas id="game"></canvas>
 
-  <div id="hud">
-    <div id="progress"></div>
-    <button id="pause-btn" type="button" aria-label="Пауза">||</button>
-    <div id="combo-box"><div id="combo">0</div><div id="combo-label">COMBO</div></div>
-    <div id="score">0000000</div>
-    <div id="track-name"></div>
-    <div id="diff-name"></div>
-  </div>
-
-  <section id="menu" class="screen">
-    <div class="m-wrap">
-      <aside class="m-list">
-        <div class="m-brand">
-          <div class="m-title">Phigros Web</div>
-          <div class="m-sub">X-Edition</div>
+    <div id="hud">
+      <div class="score">
+        <span id="score">0</span>
+        <span id="mult">x1</span>
+        <div class="status">
+          <span id="shield-ind" class="chip">ЩИТ</span>
+          <span id="magnet-ind" class="chip">МАГНИТ</span>
         </div>
-        <div class="m-tracks">
-          <button class="track-btn m-track" type="button" data-track="track">
-            <img src="assets/cover-track.jpg" alt="">
-            <span><b>Somewhat_empty</b><small>Track</small></span>
-          </button>
-          <button class="track-btn m-track" type="button" data-track="chrono">
-            <img src="assets/cover-chrono.jpg" alt="">
-            <span><b>Chronostasis</b><small>160 BPM</small></span>
-          </button>
-          <button id="custom-btn" class="m-track m-custom" type="button">
-            <span class="m-plus">+</span>
-            <span><b id="custom-name">Свой файл…</b><small>аудио · .pez</small></span>
-          </button>
-          <input id="file" type="file" accept="audio/mpeg,audio/mp4,audio/x-m4a,audio/ogg,audio/wav,audio/flac,audio/aac,.m4a,.mp3,.ogg,.wav,.flac,.pez" hidden>
-        </div>
-      </aside>
-
-      <main class="m-main">
-        <div class="m-card">
-          <img id="menu-cover" alt="">
-          <div class="m-card-info">
-            <div id="menu-trackname" class="m-name"></div>
-            <div id="menu-best" class="m-best"></div>
-          </div>
-        </div>
-        <div class="m-diffs">
-          <button class="diff-btn" type="button" data-diff="EZ"><b>6</b><span>EZ</span></button>
-          <button class="diff-btn" type="button" data-diff="HD"><b>11</b><span>HD</span></button>
-          <button class="diff-btn" type="button" data-diff="IN14"><b>14</b><span>IN</span></button>
-          <button class="diff-btn" type="button" data-diff="IN15"><b>15</b><span>IN</span></button>
-        </div>
-        <div class="m-actions">
-          <button id="settings-btn" class="m-ghost" type="button">Настройки</button>
-          <button id="play-btn" class="m-play" type="button">Играть</button>
-        </div>
-        <div id="status"></div>
-      </main>
-
-      <aside id="settings" class="m-settings">
-        <div class="m-set-head">
-          <span>Настройки</span>
-          <button id="settings-close" class="m-ghost" type="button">Готово</button>
-        </div>
-        <label class="slider">Скорость нот <span id="flow-val"></span>
-          <input id="flow" type="range" min="0.6" max="1.8" step="0.1">
-        </label>
-        <label class="slider">Задержка звука <span id="offset-val"></span>
-          <input id="offset" type="range" min="-150" max="150" step="5">
-        </label>
-        <div class="toggles">
-          <label><input id="sfx" type="checkbox"> Звук ударов</label>
-          <label><input id="rotation" type="checkbox"> Вращение линии</label>
-          <label><input id="autoplay" type="checkbox"> AutoPlay (φ Демо)</label>
-        </div>
-      </aside>
+      </div>
+      <button id="pause-btn" class="icon-btn" type="button" aria-label="Пауза">II</button>
     </div>
-  </section>
 
-  <section id="pause" class="screen hidden">
-    <div class="panel small">
+    <section id="menu" class="screen show">
+      <div class="title">
+        <div class="orb"></div>
+        <h1>PULSE FLIP</h1>
+        <p>Тапни, чтобы перевернуть гравитацию</p>
+      </div>
+      <button id="play-btn" class="btn primary" type="button">Играть</button>
+      <button id="sound-btn" class="btn" type="button">Звук: вкл</button>
+      <p id="menu-best" class="best"></p>
+      <p class="rules">Собирай кристаллы · Уходи от шипов · Лови щит и магнит</p>
+    </section>
+
+    <section id="pause" class="screen">
       <h2>Пауза</h2>
-      <button id="resume" class="play" type="button">Продолжить</button>
-      <button id="restart" class="chip wide" type="button">Переиграть</button>
-      <button id="quit" class="chip wide" type="button">В меню</button>
-    </div>
-  </section>
+      <button id="resume-btn" class="btn primary" type="button">Продолжить</button>
+      <button id="pause-menu-btn" class="btn" type="button">В меню</button>
+    </section>
 
-  <section id="result" class="screen hidden">
-    <div class="r-wrap">
-      <div class="r-left">
-        <img id="res-cover" alt="">
-        <div id="res-track" class="r-track"></div>
+    <section id="over" class="screen">
+      <h2>Конец полёта</h2>
+      <div class="over-score">
+        <b id="over-score">0</b>
+        <span id="over-note"></span>
       </div>
-      <div class="r-right">
-        <div class="r-top">
-          <div id="res-rank">F</div>
-          <div class="r-score-box">
-            <div id="res-score">0000000</div>
-            <div id="res-newbest" class="r-newbest"></div>
-          </div>
-        </div>
-        <div class="r-stats">
-          <div class="r-stat"><span>Accuracy</span><b id="res-acc">0.00%</b></div>
-          <div class="r-stat"><span>Max Combo</span><b id="res-combo">0</b></div>
-        </div>
-        <div class="r-judge">
-          <div><span>Perfect</span><b id="res-p">0</b></div>
-          <div><span>Good</span><b id="res-g">0</b></div>
-          <div><span>Bad</span><b id="res-b">0</b></div>
-          <div><span>Miss</span><b id="res-m">0</b></div>
-        </div>
-        <div class="r-el"><span>Early <b id="res-early">0</b></span><span>Late <b id="res-late">0</b></span></div>
-        <div class="r-actions">
-          <button id="res-menu" class="m-ghost" type="button">В меню</button>
-          <button id="res-replay" class="m-play" type="button">Переиграть</button>
-        </div>
+      <div class="stats">
+        <div><span>Кристаллы</span><b id="over-gems">0</b></div>
+        <div><span>Макс. комбо</span><b id="over-combo">x0</b></div>
+        <div><span>Близко</span><b id="over-near">0</b></div>
       </div>
-    </div>
-  </section>
+      <button id="retry-btn" class="btn primary" type="button">Ещё раз</button>
+      <button id="over-menu-btn" class="btn" type="button">В меню</button>
+    </section>
 
-  <section id="loading" class="screen hidden">
-    <div class="panel small">
-      <h2>Загрузка</h2>
-      <div class="sub" id="load-track"></div>
-      <div id="load-msg">Загрузка трека…</div>
-      <div class="load-bar"><div id="load-fill"></div></div>
+    <div id="rotate">
+      <div class="phone"></div>
+      <p>Поверни телефон горизонтально</p>
     </div>
-  </section>
+  </div>
   <script src="game.js"></script>
 </body>
 </html>

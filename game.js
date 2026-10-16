@@ -1,1443 +1,835 @@
 "use strict";
 (function () {
-  const DIFFS = {
-    EZ: { label: "EZ Lv.6", density: 0.9, minGap: 600, grid: 4, pHold: 0.4, pDrag: 0.15, pFlick: 0.2, pChord: 0, rot: 0, mv: 0 },
-    HD: { label: "HD Lv.11", density: 1.4, minGap: 380, grid: 4, pHold: 0.35, pDrag: 0.3, pFlick: 0.35, pChord: 0.1, rot: 6, mv: 0.4 },
-    IN14: { label: "IN Lv.14", density: 2.4, minGap: 260, grid: 8, pHold: 0.25, pDrag: 0.45, pFlick: 0.4, pChord: 0.2, rot: 10, mv: 0.6 },
-    IN15: { label: "IN Lv.15", density: 3.3, minGap: 200, grid: 8, pHold: 0.2, pDrag: 0.5, pFlick: 0.4, pChord: 0.3, rot: 14, mv: 0.8 }
-  };
-  const WIN = {
-    tap: { perfect: 80, good: 150, bad: 180 },
-    hold: { perfect: 80, good: 150 },
-    drag: { perfect: 105 },
-    flick: { perfect: 115 }
-  };
-  const HOLD_GAP = 180;
-  const COLUMN = 0.24;
-  const NOTE_HALF = 0.065;
-  const LINE_Y = 0.8;
-  const LANES = [-0.33, 0, 0.33];
-  const FRAME_MS = 10;
-  const LEAD_IN = 1.2;
-  const EFFECT_MS = 480;
-  const BASE_SPEED = 0.5;
-  const STORE_KEY = "phigros-web-x-settings";
-  const DEFAULTS = { track: "track", diff: "HD", flow: 1, offset: 0, sfx: true, rotation: true, autoplay: false };
-  const COLORS = { tap: "#2fd3ff", drag: "#e6c24a", flick: "#ff3d6e", gold: "#ffe07d", blue: "#48e5ff" };
+  const LH = 540;
+  const FLOOR = 470;
+  const CEIL = 70;
+  const R = 15;
+  const GRAV = 4600;
+  const SPIKE_S = 34;
+  const SPIKE_H = 44;
+  const BPM = 116;
+  const BEST_KEY = "pulse-flip-best";
+  const SOUND_KEY = "pulse-flip-sound";
+  const CHORDS = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];
+  const COLORS = { cyan: "#3ff3ff", pink: "#ff3ecf", gold: "#ffd34e", blue: "#4d8dff", violet: "#9b6bff", white: "#ffffff" };
 
-  function mulberry32(seed) {
-    let a = seed >>> 0;
-    return function () {
-      a = (a + 0x6d2b79f5) >>> 0;
-      let t = a;
-      t = Math.imul(t ^ (t >>> 15), t | 1);
-      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const $ = function (id) { return document.getElementById(id); };
+
+  const bgImg = new Image();
+  let bgReady = false;
+  bgImg.onload = function () { bgReady = true; };
+  bgImg.src = "assets/city-bg.jpg";
+
+  let W = 1;
+  let H = 1;
+  let S = 1;
+  let LW = 960;
+  let dpr = 1;
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    S = H / LH;
+    LW = W / S;
   }
 
-  function lowerBound(sorted, t) {
-    let lo = 0;
-    let hi = sorted.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (sorted[mid] < t) lo = mid + 1;
-      else hi = mid;
+  function glowSprite(color) {
+    const size = 128;
+    const c = document.createElement("canvas");
+    c.width = size;
+    c.height = size;
+    const g = c.getContext("2d");
+    const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grd.addColorStop(0, "rgba(255,255,255,0.95)");
+    grd.addColorStop(0.22, color);
+    grd.addColorStop(0.6, "rgba(0,0,0,0)");
+    grd.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = grd;
+    g.fillRect(0, 0, size, size);
+    return c;
+  }
+  const GLOW = {};
+  Object.keys(COLORS).forEach(function (k) { GLOW[k] = glowSprite(COLORS[k]); });
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function pick(list) { return list[Math.floor(Math.random() * list.length)]; }
+  function readNum(key) {
+    try { return Number(localStorage.getItem(key)) || 0; } catch (e) { return 0; }
+  }
+  function writeVal(key, val) {
+    try { localStorage.setItem(key, val); } catch (e) { return; }
+  }
+
+  let sound = true;
+  try { sound = localStorage.getItem(SOUND_KEY) !== "off"; } catch (e) { sound = true; }
+  let actx = null;
+  let master = null;
+  let noiseBuf = null;
+  let musicTimer = null;
+  let nextStep = 0;
+  let stepIdx = 0;
+
+  function audioReady() {
+    if (!actx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return false;
+      actx = new AC();
+      master = actx.createGain();
+      master.gain.value = sound ? 0.7 : 0;
+      master.connect(actx.destination);
+      noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     }
-    return lo;
-  }
-
-  function farEnough(sorted, t, gap) {
-    const i = lowerBound(sorted, t);
-    if (i < sorted.length && sorted[i] - t < gap) return false;
-    if (i > 0 && t - sorted[i - 1] < gap) return false;
+    if (actx.state === "suspended") actx.resume();
     return true;
   }
 
-  function insertSorted(sorted, t) {
-    sorted.splice(lowerBound(sorted, t), 0, t);
+  function tone(type, freq, t0, dur, vol, toFreq) {
+    const o = actx.createOscillator();
+    const g = actx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t0);
+    if (toFreq) o.frequency.exponentialRampToValueAtTime(toFreq, t0 + dur);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g);
+    g.connect(master);
+    o.start(t0);
+    o.stop(t0 + dur + 0.05);
   }
 
-  function detectOnsets(mono, sr) {
-    const hop = Math.max(1, Math.round((sr * FRAME_MS) / 1000));
-    const n = Math.floor(mono.length / hop);
-    const aL = 1 - Math.exp((-2 * Math.PI * 200) / sr);
-    const aH = 1 - Math.exp((-2 * Math.PI * 3000) / sr);
-    const eLow = new Float64Array(n);
-    const eHigh = new Float64Array(n);
-    let lp1 = 0;
-    let lp2 = 0;
-    for (let f = 0; f < n; f++) {
-      let sumL = 0;
-      let sumH = 0;
-      const end = (f + 1) * hop;
-      for (let i = f * hop; i < end; i++) {
-        const x = mono[i];
-        lp1 += aL * (x - lp1);
-        lp2 += aH * (x - lp2);
-        const hi = x - lp2;
-        sumL += lp1 * lp1;
-        sumH += hi * hi;
-      }
-      eLow[f] = Math.log(sumL / hop + 1e-9);
-      eHigh[f] = Math.log(sumH / hop + 1e-9);
-    }
-    const fluxL = new Float64Array(n);
-    const fluxH = new Float64Array(n);
-    for (let f = 1; f < n; f++) {
-      fluxL[f] = Math.max(0, eLow[f] - eLow[f - 1]);
-      fluxH[f] = Math.max(0, eHigh[f] - eHigh[f - 1]);
-    }
-    const flux = new Float64Array(n);
-    for (let f = 0; f < n; f++) flux[f] = fluxL[f] + fluxH[f];
-    const P = new Float64Array(n + 1);
-    for (let f = 0; f < n; f++) P[f + 1] = P[f] + flux[f];
-    const peaks = [];
-    const win = Math.round(500 / FRAME_MS);
-    for (let f = 0; f < n; f++) {
-      const a = Math.max(0, f - win);
-      const b = Math.min(n - 1, f + win);
-      const mean = (P[b + 1] - P[a]) / (b - a + 1);
-      const v = flux[f];
-      if (v < 0.12 || v <= mean * 1.5 + 0.1) continue;
-      let peak = true;
-      for (let k = Math.max(0, f - 3); k <= Math.min(n - 1, f + 3); k++) {
-        if (k === f) continue;
-        if (flux[k] > v || (flux[k] === v && k < f)) {
-          peak = false;
-          break;
-        }
-      }
-      if (!peak) continue;
-      peaks.push({ t: f * FRAME_MS, lo: fluxL[f], hi: fluxH[f], s: v });
-    }
-    let maxL = 1e-9;
-    let maxH = 1e-9;
-    for (const p of peaks) {
-      if (p.lo > maxL) maxL = p.lo;
-      if (p.hi > maxH) maxH = p.hi;
-    }
-    for (const p of peaks) {
-      p.lo = p.lo / maxL;
-      p.hi = p.hi / maxH;
-      p.s = Math.max(p.lo, p.hi);
-    }
-    return { onsets: peaks };
+  function noise(t0, dur, vol, freq, filterType) {
+    const src = actx.createBufferSource();
+    src.buffer = noiseBuf;
+    const f = actx.createBiquadFilter();
+    f.type = filterType;
+    f.frequency.value = freq;
+    const g = actx.createGain();
+    g.gain.setValueAtTime(vol, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(f);
+    f.connect(g);
+    g.connect(master);
+    src.start(t0, Math.random() * 0.5);
+    src.stop(t0 + dur + 0.05);
   }
 
-  function estimateTempo(onsets) {
-    const BINS = 64;
-    let best = { bpm: 120, phase: 0, score: -1 };
-    if (onsets.length < 4) return best;
-    for (let bpm = 80; bpm <= 200; bpm += 0.25) {
-      const period = 60000 / bpm;
-      const hist = new Float64Array(BINS);
-      for (const o of onsets) {
-        const frac = (((o.t % period) + period) % period) / period;
-        hist[Math.floor(frac * BINS) % BINS] += o.s;
-      }
-      for (let b = 0; b < BINS; b++) {
-        const score = hist[(b + BINS - 1) % BINS] + hist[b] + hist[(b + 1) % BINS];
-        if (score > best.score) {
-          best = { bpm: bpm, phase: ((b + 0.5) / BINS) * period, score: score };
-        }
-      }
+  function sfx(name) {
+    if (!sound || !audioReady()) return;
+    const t = actx.currentTime;
+    if (name === "flip") {
+      noise(t, 0.14, 0.18, 1400, "bandpass");
+      tone("sine", 300, t, 0.16, 0.18, 760);
+    } else if (name === "coin") {
+      tone("triangle", 1046, t, 0.12, 0.2);
+      tone("sine", 1568, t + 0.04, 0.14, 0.12);
+    } else if (name === "near") {
+      tone("square", 1760, t, 0.07, 0.04);
+    } else if (name === "hit") {
+      noise(t, 0.4, 0.45, 500, "lowpass");
+      tone("sawtooth", 220, t, 0.45, 0.25, 35);
+    } else if (name === "shield") {
+      noise(t, 0.3, 0.3, 3500, "highpass");
+      tone("sine", 620, t, 0.3, 0.2, 1500);
+    } else if (name === "power") {
+      tone("triangle", 523, t, 0.25, 0.22, 1046);
+      tone("triangle", 784, t + 0.1, 0.3, 0.2, 1568);
+    } else if (name === "over") {
+      tone("sawtooth", 180, t, 0.9, 0.2, 40);
+    } else if (name === "start") {
+      tone("triangle", 440, t, 0.15, 0.2, 880);
     }
-    return best;
   }
 
-  function analyzeBuffer(buffer) {
-    const a = buffer.getChannelData(0);
-    const b = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : null;
-    const mono = new Float32Array(a.length);
-    for (let i = 0; i < a.length; i++) mono[i] = b ? (a[i] + b[i]) * 0.5 : a[i];
-    const res = detectOnsets(mono, buffer.sampleRate);
-    const tempo = estimateTempo(res.onsets);
-    return { onsets: res.onsets, bpm: tempo.bpm, phase: tempo.phase, durationMs: buffer.duration * 1000 };
+  function mtof(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+
+  function scheduleStep(step, t) {
+    const s = step % 16;
+    const chord = CHORDS[Math.floor(step / 16) % CHORDS.length];
+    if (s % 2 === 0) tone("triangle", mtof(chord[0] - 24), t, 0.2, 0.2);
+    if (s % 4 === 0) tone("sine", 120, t, 0.2, 0.42, 42);
+    if (s % 2 === 1) noise(t, 0.05, 0.05, 8000, "highpass");
+    tone("triangle", mtof(chord[s % 3] + 12), t, 0.2, 0.05);
   }
 
-  function makeNote(type, time, lane, side, dur, chord) {
+  function musicStart() {
+    if (!audioReady() || musicTimer) return;
+    nextStep = actx.currentTime + 0.1;
+    musicTimer = setInterval(function () {
+      const stepDur = 60 / BPM / 4;
+      while (nextStep < actx.currentTime + 0.15) {
+        if (sound) scheduleStep(stepIdx, nextStep);
+        nextStep += stepDur;
+        stepIdx++;
+      }
+    }, 30);
+  }
+
+  function musicStop() {
+    if (musicTimer) {
+      clearInterval(musicTimer);
+      musicTimer = null;
+    }
+  }
+
+  function toggleSound() {
+    sound = !sound;
+    writeVal(SOUND_KEY, sound ? "on" : "off");
+    if (master) master.gain.value = sound ? 0.7 : 0;
+    refreshSoundLabel();
+  }
+
+  function refreshSoundLabel() {
+    $("sound-btn").textContent = sound ? "Звук: вкл" : "Звук: выкл";
+  }
+
+  let st = "menu";
+  let best = readNum(BEST_KEY);
+  let w = null;
+  const stars = [];
+  for (let i = 0; i < 70; i++) {
+    stars.push({ x: Math.random(), y: Math.random(), v: rand(0.3, 1), r: rand(0.8, 2), p: rand(0, 6) });
+  }
+
+  function PX() { return LW * 0.22; }
+  function surfaceY(side) { return side > 0 ? FLOOR - 40 : CEIL + 40; }
+
+  function newWorld() {
     return {
-      type: type,
-      time: Math.round(time),
-      lane: lane,
-      side: side,
-      dur: Math.round(dur),
-      endTime: Math.round(time + dur),
-      chord: chord,
-      state: "wait",
-      headResult: null,
-      lastHeld: 0
+      t: 0,
+      speed: 360,
+      score: 0,
+      gems: 0,
+      combo: 0,
+      maxCombo: 0,
+      mult: 1,
+      near: 0,
+      shield: false,
+      magnet: 0,
+      shake: 0,
+      flash: 0,
+      dying: false,
+      deadT: 0,
+      bgX: 0,
+      p: { y: FLOOR - R, vy: 0, dir: 1, squash: 0, ring: 0, trail: 0 },
+      obs: [],
+      pick: [],
+      parts: [],
+      texts: [],
+      spawnX: LW + 200
     };
   }
 
-  function cloneNotes(notes) {
-    return notes.map(function (n) {
-      return makeNote(n.type, n.time, n.lane, n.side, n.dur, n.chord);
-    });
+  function burst(x, y, g, n, speed) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const v = speed * rand(0.3, 1);
+      w.parts.push({ kind: "spark", x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0, max: rand(0.35, 0.8), size: rand(6, 14), g: g });
+    }
+    if (n > 8) w.parts.push({ kind: "ring", x: x, y: y, life: 0, max: 0.45, r: R, g: g });
+    if (w.parts.length > 360) w.parts.splice(0, w.parts.length - 360);
   }
 
-  function stepEvents(phase, stepMs, endMs, rampMs, valueAt) {
-    const events = [];
-    const kA = Math.floor(-phase / stepMs) - 1;
-    const kB = Math.ceil((endMs - phase) / stepMs) + 1;
-    const hold = stepMs - rampMs;
-    for (let k = kA; k < kB; k++) {
-      const t0 = phase + k * stepMs;
-      const v0 = valueAt(k);
-      events.push({ start: t0, end: t0 + hold, startV: v0, endV: v0 });
-      events.push({ start: t0 + hold, end: t0 + stepMs, startV: v0, endV: valueAt(k + 1) });
-    }
-    return events;
+  function text(str, x, y, g) {
+    w.texts.push({ str: str, x: x, y: y, life: 0, max: 0.9, g: g });
   }
 
-  function targetPattern(amp, seed) {
-    const len = 64;
-    const out = [];
-    if (amp <= 0) {
-      for (let i = 0; i < len; i++) out.push(0);
-      return out;
-    }
-    const rng = mulberry32(seed);
-    for (let i = 0; i < len; i++) {
-      const r = rng();
-      out.push(r < 0.5 ? 0 : r < 0.75 ? -amp : amp);
-    }
-    return out;
+  function addSpike(x, side, n) {
+    w.obs.push({ x: x, side: side, n: n, w: n * SPIKE_S, near: false, dead: false });
   }
 
-  function makeLines(an, cfg, durationMs) {
-    const beat = 60000 / an.bpm;
-    const endMs = durationMs + 30000;
-    const stepMs = beat * 8;
-    const rampMs = beat * 4;
-    const rotPat = targetPattern(cfg.rot, 1001);
-    const movePat = targetPattern(cfg.mv, 2002);
-    const at = function (pat, k) {
-      const n = pat.length;
-      return pat[((k % n) + n) % n];
-    };
-    return {
-      rotate: stepEvents(an.phase, stepMs, endMs, rampMs, function (k) {
-        return at(rotPat, k);
-      }),
-      moveX: stepEvents(an.phase, stepMs, endMs, rampMs, function (k) {
-        return at(movePat, k);
-      }),
-      speed: [{ start: -60000, end: endMs + 60000, value: BASE_SPEED }]
-    };
+  function addPick(x, y, kind) {
+    w.pick.push({ x: x, y: y, kind: kind, taken: false, spin: rand(0, 6) });
   }
 
-  function generateChart(an, diffKey) {
-    const cfg = DIFFS[diffKey] || DIFFS.HD;
-    const rng = mulberry32(4242 + Object.keys(DIFFS).indexOf(diffKey) * 77);
-    const beat = 60000 / an.bpm;
-    const step = beat / cfg.grid;
-    const durationMs = an.durationMs;
-    const cand = [];
-    for (const o of an.onsets) {
-      if (o.t < 600) continue;
-      const q = an.phase + Math.round((o.t - an.phase) / step) * step;
-      cand.push({ t: Math.round(q), s: o.s, lo: o.lo, hi: o.hi });
-    }
-    cand.sort(function (a, b) { return a.t - b.t || b.s - a.s; });
-    const merged = [];
-    for (const c of cand) {
-      const last = merged[merged.length - 1];
-      if (last && c.t === last.t) {
-        if (c.s > last.s) merged[merged.length - 1] = c;
+  function spawnAhead() {
+    while (w.spawnX < LW + 300) {
+      const x = w.spawnX;
+      let kind = pick(["single", "run", "run", "arc", "gems", "power"]);
+      if (w.t < 5) kind = "gems";
+      if (kind === "power" && w.t < 12) kind = "gems";
+      if (kind === "single") {
+        const side = pick([1, -1]);
+        const n = Math.random() < 0.5 ? 2 : 3;
+        addSpike(x, side, n);
+        for (let i = 0; i < 4; i++) addPick(x + 10 + i * 34, surfaceY(-side), "gem");
+        w.spawnX = x + n * SPIKE_S + rand(280, 360);
+      } else if (kind === "run") {
+        const gapX = Math.max(250, w.speed * 0.66);
+        const count = 3 + Math.floor(rand(0, 3));
+        let side = pick([1, -1]);
+        let cx = x;
+        for (let i = 0; i < count; i++) {
+          addSpike(cx, side, 2);
+          addPick(cx + (gapX + 68) / 2, surfaceY(-side), "gem");
+          side = Math.random() < 0.75 ? -side : side;
+          cx += gapX;
+        }
+        w.spawnX = cx + 200;
+      } else if (kind === "arc") {
+        const base = pick([300, 250]);
+        for (let i = 0; i < 7; i++) addPick(x + i * 36, base - 110 * Math.sin((i / 6) * Math.PI), "gem");
+        w.spawnX = x + 6 * 36 + 300;
+      } else if (kind === "gems") {
+        const side = pick([1, -1]);
+        for (let i = 0; i < 6; i++) addPick(x + i * 34, surfaceY(side), "gem");
+        w.spawnX = x + 5 * 34 + 260;
       } else {
-        merged.push(c);
+        const side = pick([1, -1]);
+        addPick(x + 20, surfaceY(side), pick(["shield", "magnet"]));
+        w.spawnX = x + 300;
       }
     }
-    const target = Math.max(1, Math.round((durationMs / 1000) * cfg.density));
-    const byStrength = merged.slice().sort(function (a, b) { return b.s - a.s; });
-    const sorted = [];
-    const accepted = [];
-    for (const c of byStrength) {
-      if (accepted.length >= target) break;
-      if (!farEnough(sorted, c.t, cfg.minGap)) continue;
-      insertSorted(sorted, c.t);
-      accepted.push(c);
+  }
+
+  function flip() {
+    if (st !== "play" || !w || w.dying) return;
+    const p = w.p;
+    p.dir = -p.dir;
+    p.vy = 0;
+    p.squash = 1;
+    p.ring = 1;
+    burst(PX(), p.y, p.dir > 0 ? "cyan" : "pink", 14, 220);
+    sfx("flip");
+  }
+
+  function updatePlayer(dt) {
+    const p = w.p;
+    p.vy += GRAV * p.dir * dt;
+    p.y += p.vy * dt;
+    const lo = CEIL + R;
+    const hi = FLOOR - R;
+    if (p.y >= hi) {
+      p.y = hi;
+      if (p.vy > 0) p.vy = 0;
     }
-    accepted.forEach(function (c, idx) { c.strengthPct = idx / accepted.length; });
-    const loSorted = accepted.map(function (c) { return c.lo; }).sort(function (a, b) { return a - b; });
-    accepted.forEach(function (c) {
-      c.loPct = lowerBound(loSorted, c.lo) / loSorted.length;
-    });
-    accepted.sort(function (a, b) { return a.t - b.t; });
-    const notes = [];
-    let lastLane = -1;
-    const pickLane = function (exclude) {
-      let li;
-      do {
-        li = Math.floor(rng() * LANES.length);
-      } while (li === exclude);
-      return li;
-    };
-    for (let i = 0; i < accepted.length; i++) {
-      const c = accepted[i];
-      const p = c.strengthPct;
-      const prevGap = i > 0 ? c.t - accepted[i - 1].t : 1e9;
-      const nextGap = i + 1 < accepted.length ? accepted[i + 1].t - c.t : 1e9;
-      let type = "tap";
-      let dur = 0;
-      if (nextGap >= beat * 1.0 && rng() < cfg.pHold) {
-        type = "hold";
-        const span = Math.min(beat * 4, nextGap - beat * 0.5);
-        dur = Math.max(beat / 2, Math.floor(span / (beat / 4)) * (beat / 4));
-      } else if ((c.hi > c.lo || (prevGap <= beat * 0.5 && nextGap <= beat * 0.5)) && rng() < cfg.pDrag) {
-        type = "drag";
-      } else if (c.loPct >= 0.8 && rng() < cfg.pFlick) {
-        type = "flick";
-      }
-      const li = pickLane(lastLane);
-      lastLane = li;
-      const side = 1;
-      const main = makeNote(type, c.t, LANES[li], side, dur, false);
-      notes.push(main);
-      const beatIdx = Math.round((c.t - an.phase) / beat);
-      const onBeat = Math.abs(c.t - an.phase - beatIdx * beat) < step * 0.25;
-      const strongBeat = beatIdx % 2 === 0 && p < 0.35;
-      if (type !== "hold" && onBeat && strongBeat && rng() < cfg.pChord) {
-        const lj = pickLane(li);
-        main.chord = true;
-        notes.push(makeNote("tap", c.t, LANES[lj], side, 0, true));
-      }
+    if (p.y <= lo) {
+      p.y = lo;
+      if (p.vy < 0) p.vy = 0;
     }
-    notes.sort(function (a, b) { return a.time - b.time || a.lane - b.lane; });
-    return { notes: notes, lines: makeLines(an, cfg, durationMs), durationMs: durationMs };
-  }
-
-  function judgeDelta(type, adt) {
-    if (type === "tap") {
-      if (adt <= WIN.tap.perfect) return "perfect";
-      if (adt <= WIN.tap.good) return "good";
-      if (adt <= WIN.tap.bad) return "bad";
-      return null;
+    p.squash = Math.max(0, p.squash - dt * 5);
+    p.ring = Math.max(0, p.ring - dt * 3);
+    p.trail -= dt;
+    if (p.trail <= 0) {
+      p.trail = 0.016;
+      w.parts.push({ kind: "spark", x: PX(), y: p.y, vx: -w.speed * 0.25 + rand(-30, 30), vy: rand(-25, 25), life: 0, max: 0.4, size: 8, g: p.dir > 0 ? "cyan" : "pink" });
     }
-    if (type === "hold") {
-      if (adt <= WIN.hold.perfect) return "perfect";
-      if (adt <= WIN.hold.good) return "good";
-      return null;
+  }
+
+  function updateWorld(dt) {
+    w.t += dt;
+    w.speed = 360 + Math.min(340, w.t * 7);
+    const d = w.speed * dt;
+    w.bgX += d * 0.22;
+    w.score += d * 0.02;
+    w.spawnX -= d;
+    w.magnet = Math.max(0, w.magnet - dt);
+    w.obs.forEach(function (o) { o.x -= d; });
+    w.pick.forEach(function (k) { k.x -= d; });
+    w.obs = w.obs.filter(function (o) { return !o.dead && o.x + o.w > -60; });
+  }
+
+  function take(k) {
+    k.taken = true;
+    if (k.kind === "gem") {
+      w.combo++;
+      w.maxCombo = Math.max(w.maxCombo, w.combo);
+      w.mult = 1 + Math.min(7, Math.floor(w.combo / 5));
+      w.gems++;
+      const pts = 10 * w.mult;
+      w.score += pts;
+      burst(k.x, k.y, "gold", 10, 260);
+      text("+" + pts, k.x, k.y - 16, "gold");
+      sfx("coin");
+    } else if (k.kind === "shield") {
+      w.shield = true;
+      burst(k.x, k.y, "blue", 18, 300);
+      text("ЩИТ", k.x, k.y - 16, "blue");
+      sfx("power");
+    } else {
+      w.magnet = 6;
+      burst(k.x, k.y, "violet", 18, 300);
+      text("МАГНИТ", k.x, k.y - 16, "violet");
+      sfx("power");
     }
-    const w = type === "drag" ? WIN.drag.perfect : WIN.flick.perfect;
-    return adt <= w ? "perfect" : null;
   }
 
-  function computeScore(c, total, maxCombo) {
-    if (total <= 0) return 0;
-    const acc = (c.perfect + c.good * 0.65) / total;
-    return Math.round(900000 * acc + 100000 * (maxCombo / total));
-  }
-
-  function rankOf(c, total, score) {
-    if (total > 0 && c.good === 0 && c.bad === 0 && c.miss === 0) return { label: "φ", color: COLORS.gold };
-    if (total > 0 && c.bad === 0 && c.miss === 0) return { label: "V", color: COLORS.blue };
-    if (score >= 960000) return { label: "V", color: "#ffffff" };
-    if (score >= 920000) return { label: "S", color: "#ffffff" };
-    if (score >= 880000) return { label: "A", color: "#ffffff" };
-    if (score >= 820000) return { label: "B", color: "#ffffff" };
-    if (score >= 700000) return { label: "C", color: "#ffffff" };
-    return { label: "F", color: "#ff6b6b" };
-  }
-
-  function lineColor(c) {
-    if (c.good === 0 && c.bad === 0 && c.miss === 0) return COLORS.gold;
-    if (c.bad === 0 && c.miss === 0) return COLORS.blue;
-    return "#ffffff";
-  }
-
-  function evalTrack(list, ms, def) {
-    if (!list || list.length === 0) return def;
-    if (ms <= list[0].start) return list[0].startV;
-    const last = list[list.length - 1];
-    if (ms >= last.end) return last.endV;
-    let lo = 0;
-    let hi = list.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      if (list[mid].start <= ms) lo = mid;
-      else hi = mid - 1;
-    }
-    const e = list[lo];
-    if (ms >= e.end) return e.endV;
-    const k = (ms - e.start) / (e.end - e.start);
-    return e.startV + (e.endV - e.startV) * k;
-  }
-
-  function floorAt(events, ms, flow) {
-    let total = 0;
-    for (const e of events) {
-      if (ms <= e.start) break;
-      const t1 = Math.min(ms, e.end);
-      total += ((t1 - e.start) / 1000) * e.value;
-    }
-    return total * flow;
-  }
-
-  function makeHitBuffer(actx, kind) {
-    const sr = actx.sampleRate;
-    const len = Math.floor(sr * 0.12);
-    const buf = actx.createBuffer(1, len, sr);
-    const d = buf.getChannelData(0);
-    let prev = 0;
-    for (let i = 0; i < len; i++) {
-      const t = i / sr;
-      if (kind === "tap") {
-        d[i] = Math.sin(2 * Math.PI * 900 * t) * Math.exp(-45 * t) * 0.8;
-      } else if (kind === "drag") {
-        d[i] = ((2 / Math.PI) * Math.asin(Math.sin(2 * Math.PI * 620 * t)) * Math.exp(-30 * t)) * 0.6;
-      } else {
-        const noise = Math.random() * 2 - 1;
-        d[i] = (noise - prev) * 0.5 * Math.exp(-35 * t);
-        prev = noise;
-      }
-    }
-    return buf;
-  }
-
-  function synthChrono(actx) {
-    const sr = actx.sampleRate;
-    const beat = 60 / 160;
-    const bars = 32;
-    const total = Math.floor(beat * 4 * bars * sr) + sr;
-    const buf = actx.createBuffer(1, total, sr);
-    const d = buf.getChannelData(0);
-    const TWO_PI = Math.PI * 2;
-    const mtof = function (m) { return 440 * Math.pow(2, (m - 69) / 12); };
-    const chords = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];
-    let seed = 99;
-    const rnd = function () {
-      seed = (seed * 16807) % 2147483647;
-      return (seed / 2147483647) * 2 - 1;
-    };
-    const add = function (start, dur, fn) {
-      const i0 = Math.max(0, Math.floor(start * sr));
-      const i1 = Math.min(total, Math.floor((start + dur) * sr));
-      for (let i = i0; i < i1; i++) d[i] += fn(i / sr - start);
-    };
-    for (let b = 0; b < bars; b++) {
-      const ch = chords[b % 4];
-      const barStart = b * 4 * beat;
-      for (let k = 0; k < 4; k++) {
-        const s = barStart + k * beat;
-        add(s, 0.42, function (t) {
-          return Math.sin(TWO_PI * (45 * t + (110 / 30) * (1 - Math.exp(-30 * t)))) * Math.exp(-12 * t) * 0.8;
-        });
-        if (k % 2 === 1) {
-          add(s, 0.2, function (t) { return rnd() * Math.exp(-28 * t) * 0.22; });
+  function checkPicks() {
+    const px = PX();
+    const py = w.p.y;
+    w.pick.forEach(function (k) {
+      if (k.taken) return;
+      if (w.magnet > 0 && k.kind === "gem") {
+        const mx = px - k.x;
+        const my = py - k.y;
+        if (mx * mx + my * my < 220 * 220) {
+          k.x += mx * 0.12;
+          k.y += my * 0.12;
         }
       }
-      for (let e = 0; e < 8; e++) {
-        const s = barStart + (e * beat) / 2;
-        add(s, 0.06, function (t) { return rnd() * Math.exp(-90 * t) * 0.12; });
-        const root = ch[0] - 12 + (e % 2 === 1 ? ch[2] - ch[0] : 0);
-        const f = mtof(root);
-        add(s, (beat / 2) * 0.9, function (t) {
-          let v = 0;
-          for (let h = 1; h <= 6; h++) v += Math.sin(TWO_PI * f * h * t) / h;
-          return v * 0.1 * Math.exp(-4 * t);
-        });
+      const dx = k.x - px;
+      const dy = k.y - py;
+      if (dx * dx + dy * dy < (R + 16) * (R + 16)) {
+        take(k);
+      } else if (k.kind === "gem" && k.x < px - 24) {
+        k.taken = true;
+        w.combo = 0;
+        w.mult = 1;
       }
-      for (let s16 = 0; s16 < 16; s16++) {
-        const s = barStart + (s16 * beat) / 4;
-        const f = mtof(ch[s16 % 3] + 24);
-        add(s, (beat / 4) * 0.85, function (t) {
-          return (Math.sin(TWO_PI * f * t) >= 0 ? 1 : -1) * Math.exp(-9 * t) * 0.06;
-        });
-      }
-    }
-    let peak = 0;
-    for (let i = 0; i < total; i++) {
-      const v = Math.abs(d[i]);
-      if (v > peak) peak = v;
-    }
-    if (peak > 0) {
-      const k = 0.85 / peak;
-      for (let i = 0; i < total; i++) d[i] *= k;
-    }
-    return buf;
-  }
-
-  function decodeData(actx, data) {
-    return new Promise(function (resolve, reject) {
-      actx.decodeAudioData(data, resolve, reject);
     });
+    w.pick = w.pick.filter(function (k) { return !k.taken && k.x > -60; });
   }
 
-  const PEZ_TYPES = { 1: "tap", 2: "drag", 3: "hold", 4: "flick" };
-  const DIFF_TAGS = { EZ: ["6", "EZ"], HD: ["11", "HD"], IN14: ["14", "IN"], IN15: ["15", "IN"] };
-
-  function toBuffer(u8) {
-    return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+  function die() {
+    if (w.dying) return;
+    w.dying = true;
+    w.deadT = 0;
+    const px = PX();
+    burst(px, w.p.y, "pink", 50, 520);
+    burst(px, w.p.y, "white", 26, 380);
+    w.shake = 22;
+    w.flash = 1;
+    sfx("hit");
+    if (navigator.vibrate) navigator.vibrate(80);
   }
 
-  function parsePezInfo(text) {
-    const info = {};
-    text.split(/\r?\n/).forEach(function (line) {
-      const i = line.indexOf(":");
-      if (i > 0) info[line.slice(0, i).trim()] = line.slice(i + 1).trim();
-    });
-    return info;
-  }
-
-  function readZip(bytes) {
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    let eocd = -1;
-    for (let i = bytes.byteLength - 22; i >= Math.max(0, bytes.byteLength - 65557); i--) {
-      if (view.getUint32(i, true) === 0x06054b50) {
-        eocd = i;
-        break;
-      }
-    }
-    if (eocd < 0) throw new Error("это не архив .pez");
-    const count = view.getUint16(eocd + 10, true);
-    let p = view.getUint32(eocd + 16, true);
-    const entries = {};
-    for (let k = 0; k < count; k++) {
-      if (view.getUint32(p, true) !== 0x02014b50) throw new Error("архив повреждён");
-      const method = view.getUint16(p + 10, true);
-      const csize = view.getUint32(p + 20, true);
-      const nlen = view.getUint16(p + 28, true);
-      const xlen = view.getUint16(p + 30, true);
-      const clen = view.getUint16(p + 32, true);
-      const loc = view.getUint32(p + 42, true);
-      const name = new TextDecoder("utf-8").decode(bytes.subarray(p + 46, p + 46 + nlen));
-      entries[name] = { method: method, csize: csize, loc: loc };
-      p += 46 + nlen + xlen + clen;
-    }
-    return { bytes: bytes, view: view, entries: entries };
-  }
-
-  async function unzipEntry(zip, name) {
-    const e = zip.entries[name];
-    if (!e) return null;
-    const start = e.loc + 30 + zip.view.getUint16(e.loc + 26, true) + zip.view.getUint16(e.loc + 28, true);
-    const data = zip.bytes.subarray(start, start + e.csize);
-    if (e.method === 0) return data;
-    if (e.method !== 8) throw new Error("неподдерживаемое сжатие в архиве");
-    if (typeof DecompressionStream === "undefined") throw new Error("браузер не умеет читать .pez, нужен Chrome 80+");
-    const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-    return new Uint8Array(await new Response(stream).arrayBuffer());
-  }
-
-  function pezLevel(text) {
-    const m = /(EZ|HD|IN|AT)\s*Lv\.?\s*(\d+)/i.exec(text || "");
-    if (!m) return { family: "", num: "?", key: "HD" };
-    const family = m[1].toUpperCase();
-    const num = parseInt(m[2], 10);
-    const key = family === "EZ" ? "EZ" : family === "HD" ? "HD" : num >= 15 ? "IN15" : "IN14";
-    return { family: family, num: String(num), key: key };
-  }
-
-  function rpeBeat(t) {
-    return t[0] + t[1] / (t[2] || 1);
-  }
-
-  function beatToMs(segs, beat) {
-    let ms = 0;
-    for (let i = 0; i < segs.length; i++) {
-      const from = segs[i].beat;
-      const to = i + 1 < segs.length ? segs[i + 1].beat : Infinity;
-      const span = Math.min(beat, to) - from;
-      if (span > 0) ms += span * 60000 / segs[i].bpm;
-      if (beat <= to) break;
-    }
-    return ms;
-  }
-
-  function buildPezChart(json, offsetMs, durationMs, diffKey) {
-    const cfg = DIFFS[diffKey] || DIFFS.HD;
-    const segs = (json.BPMList || []).map(function (b) {
-      return { beat: rpeBeat(b.startTime), bpm: b.bpm };
-    }).sort(function (a, b) { return a.beat - b.beat; });
-    if (!segs.length) segs.push({ beat: 0, bpm: 120 });
-    segs[0].beat = 0;
-    const an = { bpm: segs[0].bpm, phase: 0, durationMs: durationMs };
-    const seen = {};
-    const notes = [];
-    (json.judgeLineList || []).forEach(function (line) {
-      (line.notes || []).forEach(function (n) {
-        if (n.isFake) return;
-        let type = PEZ_TYPES[n.type];
-        if (!type) return;
-        const start = beatToMs(segs, rpeBeat(n.startTime)) + offsetMs;
-        const end = beatToMs(segs, rpeBeat(n.endTime)) + offsetMs;
-        const dur = type === "hold" ? end - start : 0;
-        if (type === "hold" && dur <= 0) type = "tap";
-        const time = Math.max(0, Math.round(start));
-        const u = n.positionX / 675;
-        const lane = u < -0.25 ? LANES[0] : u > 0.25 ? LANES[2] : LANES[1];
-        const key = time + "|" + lane + "|" + type;
-        if (seen[key]) return;
-        seen[key] = true;
-        notes.push(makeNote(type, time, lane, 1, type === "hold" ? dur : 0, false));
-      });
-    });
-    notes.sort(function (a, b) { return a.time - b.time || a.lane - b.lane; });
-    for (let i = 0; i < notes.length; i++) {
-      let j = i;
-      while (j + 1 < notes.length && notes[j + 1].time === notes[i].time) j++;
-      if (j > i) for (let k = i; k <= j; k++) notes[k].chord = true;
-      i = j;
-    }
-    return { notes: notes, lines: makeLines(an, cfg, durationMs), an: an, durationMs: durationMs };
-  }
-
-  function loadSettings() {
-    try {
-      const raw = localStorage.getItem(STORE_KEY);
-      return Object.assign({}, DEFAULTS, raw ? JSON.parse(raw) : {});
-    } catch (e) {
-      return Object.assign({}, DEFAULTS);
-    }
-  }
-
-  function saveSettings(s) {
-    try {
-      localStorage.setItem(STORE_KEY, JSON.stringify(s));
-    } catch (e) {
-      return;
-    }
-  }
-
-  function pad7(n) {
-    return String(Math.max(0, n)).padStart(7, "0");
-  }
-
-  function init() {
-    const canvas = document.getElementById("game");
-    const ctx = canvas.getContext("2d");
-    const el = function (id) { return document.getElementById(id); };
-    let W = 1;
-    let H = 1;
-    let DPR = 1;
-
-    function resize() {
-      DPR = Math.min(window.devicePixelRatio || 1, 2);
-      W = window.innerWidth;
-      H = window.innerHeight;
-      canvas.width = Math.round(W * DPR);
-      canvas.height = Math.round(H * DPR);
-    }
-    resize();
-    window.addEventListener("resize", resize);
-
-    const settings = loadSettings();
-    if (settings.track !== "track" && settings.track !== "chrono") settings.track = "track";
-    if (!DIFFS[settings.diff]) settings.diff = "HD";
-
-    let audio = null;
-    const buffers = {};
-    const analyses = {};
-    const charts = {};
-    const trackNames = { track: "Somewhat_empty — Track", chrono: "Chronostasis — 160 BPM", custom: "" };
-    const covers = { track: "assets/cover-track.jpg", chrono: "assets/cover-chrono.jpg", custom: "assets/bg.jpg" };
-    let pezState = null;
-    function bestKey(track, diff) {
-      return (track === "custom" ? "custom:" + trackNames.custom : track) + "|" + diff;
-    }
-    const BEST_KEY = "phigros-web-x-best";
-    function loadBest() {
-      try {
-        return JSON.parse(localStorage.getItem(BEST_KEY)) || {};
-      } catch (e) {
-        return {};
-      }
-    }
-    let game = null;
-
-    function persist() {
-      saveSettings(settings);
-    }
-
-    function setStatus(msg) {
-      el("status").textContent = msg;
-    }
-
-    function setText(id, s) {
-      const node = el(id);
-      if (node.textContent !== s) node.textContent = s;
-    }
-
-    function syncMenu() {
-      const locked = !!pezState && settings.track === "custom";
-      if (locked) settings.diff = pezState.key;
-      document.querySelectorAll(".track-btn").forEach(function (b) {
-        b.classList.toggle("on", b.dataset.track === settings.track);
-      });
-      document.querySelectorAll(".diff-btn").forEach(function (b) {
-        b.classList.toggle("on", b.dataset.diff === settings.diff);
-        b.disabled = locked && b.dataset.diff !== pezState.key;
-        const tag = locked && b.dataset.diff === pezState.key ? [pezState.num, pezState.family] : DIFF_TAGS[b.dataset.diff];
-        b.querySelector("b").textContent = tag[0];
-        b.querySelector("span").textContent = tag[1];
-      });
-      const custom = el("custom-btn");
-      custom.classList.toggle("on", settings.track === "custom");
-      el("custom-name").textContent = buffers.custom ? trackNames.custom : "Свой файл…";
-      el("menu-cover").src = covers[settings.track] || covers.custom;
-      el("menu-trackname").textContent = settings.track === "custom" ? (buffers.custom ? trackNames.custom : "Свой аудиофайл") : trackNames[settings.track];
-      const prevBest = loadBest()[bestKey(settings.track, settings.diff)];
-      el("menu-best").textContent = prevBest ? "Лучший результат  " + pad7(prevBest.score) + "  ·  " + prevBest.rank + "  ·  " + prevBest.acc.toFixed(2) + "%" : "Ещё не играли на этой сложности";
-      el("flow").value = settings.flow;
-      el("flow-val").textContent = settings.flow.toFixed(1) + "x";
-      el("offset").value = settings.offset;
-      el("offset-val").textContent = settings.offset + " мс";
-      el("sfx").checked = settings.sfx;
-      el("rotation").checked = settings.rotation;
-      el("autoplay").checked = settings.autoplay;
-    }
-
-    function setScreen(name) {
-      el("menu").classList.toggle("hidden", name !== "menu");
-      el("pause").classList.toggle("hidden", name !== "pause");
-      el("result").classList.toggle("hidden", name !== "result");
-      el("loading").classList.toggle("hidden", name !== "loading");
-      document.body.classList.toggle("playing", name === "game" || name === "pause");
-    }
-
-    function ensureAudio() {
-      if (!audio) {
-        const AC = window.AudioContext || window.webkitAudioContext;
-        const actx = new AC();
-        const music = actx.createGain();
-        music.gain.value = 0.9;
-        music.connect(actx.destination);
-        const sfx = actx.createGain();
-        sfx.gain.value = 0.6;
-        sfx.connect(actx.destination);
-        audio = {
-          ctx: actx,
-          music: music,
-          sfx: sfx,
-          hits: {
-            tap: makeHitBuffer(actx, "tap"),
-            drag: makeHitBuffer(actx, "drag"),
-            flick: makeHitBuffer(actx, "flick")
-          }
-        };
-      }
-      if (audio.ctx.state === "suspended") audio.ctx.resume();
-      return audio;
-    }
-
-    function playHit(kind) {
-      if (!settings.sfx || !audio) return;
-      const src = audio.ctx.createBufferSource();
-      src.buffer = audio.hits[kind];
-      src.connect(audio.sfx);
-      src.start();
-    }
-
-    async function loadTrack(id) {
-      if (buffers[id]) return buffers[id];
-      const a = ensureAudio();
-      if (id === "track") {
-        const res = await fetch("track.m4a");
-        if (!res.ok) throw new Error("track.m4a не найден");
-        buffers[id] = await decodeData(a.ctx, await res.arrayBuffer());
-      } else if (id === "chrono") {
-        buffers[id] = synthChrono(a.ctx);
-      } else {
-        throw new Error("выбери свой аудиофайл");
-      }
-      return buffers[id];
-    }
-
-    function getChart(id, diff) {
-      if (id === "custom" && pezState && diff === pezState.key) return pezState.chart;
-      const buf = buffers[id];
-      if (!analyses[id] || analyses[id].src !== buf) {
-        analyses[id] = { src: buf, data: analyzeBuffer(buf) };
-        Object.keys(charts).forEach(function (k) {
-          if (k.indexOf(id + "|") === 0) delete charts[k];
-        });
-      }
-      const key = id + "|" + diff;
-      if (!charts[key]) charts[key] = generateChart(analyses[id].data, diff);
-      return { notes: charts[key].notes, lines: charts[key].lines, an: analyses[id].data, durationMs: charts[key].durationMs };
-    }
-
-    function stopSource() {
-      if (game && game.src) {
-        try {
-          game.src.stop();
-        } catch (e) {
+  function checkObstacles() {
+    const px = PX();
+    const py = w.p.y;
+    for (let i = 0; i < w.obs.length; i++) {
+      const o = w.obs[i];
+      if (o.x > px + R + 40 || o.x + o.w < px - R - 40) continue;
+      const tip = o.side > 0 ? FLOOR - SPIKE_H * 0.8 : CEIL + SPIKE_H * 0.8;
+      const edge = o.side > 0 ? py + R : py - R;
+      const gap = o.side > 0 ? tip - edge : edge - tip;
+      const overlapX = px + 8 > o.x + 4 && px - 8 < o.x + o.w - 4;
+      if (overlapX && gap < 0) {
+        if (w.shield) {
+          w.shield = false;
+          o.dead = true;
+          burst(px, py, "blue", 30, 360);
+          w.shake = 10;
+          sfx("shield");
           return;
         }
-        game.src = null;
-      }
-    }
-
-    function songMs(g) {
-      return (audio.ctx.currentTime - g.t0) * 1000 - settings.offset;
-    }
-
-    function geometry(g, ms) {
-      const Lx = Math.min(W * 0.9, H * 1.8);
-      const X = Lx / 14;
-      let mx = 0;
-      let deg = 0;
-      if (settings.rotation) {
-        deg = evalTrack(g.lines.rotate, ms, 0);
-        mx = evalTrack(g.lines.moveX, ms, 0);
-      }
-      const ang = (-deg * Math.PI) / 180;
-      const cx = W / 2 + mx * X;
-      const cy = H * LINE_Y;
-      return { cx: cx, cy: cy, ang: ang, Lx: Lx, X: X, cos: Math.cos(ang), sin: Math.sin(ang) };
-    }
-
-    function localU(g, x, y) {
-      const dx = x - g.geo.cx;
-      const dy = y - g.geo.cy;
-      return (dx * g.geo.cos + dy * g.geo.sin) / g.geo.Lx;
-    }
-
-    function inColumn(u, lane) {
-      return Math.abs(u - lane) <= COLUMN;
-    }
-
-    function pointerInColumn(g, lane) {
-      for (const p of g.pointers.values()) {
-        if (inColumn(localU(g, p.x, p.y), lane)) return true;
-      }
-      return false;
-    }
-
-    function floorOf(g, ms) {
-      return floorAt(g.lines.speed, ms, settings.flow);
-    }
-
-    function advanceLo(g) {
-      while (g.lo < g.N && g.notes[g.lo].state === "done") g.lo++;
-    }
-
-    function tally(g, res) {
-      g.counts[res]++;
-      if (res === "perfect" || res === "good") {
-        g.combo++;
-        if (g.combo > g.maxCombo) g.maxCombo = g.combo;
-      } else {
-        g.combo = 0;
-      }
-    }
-
-    function spawnEffect(g, lane, res) {
-      if (res !== "perfect" && res !== "good") return;
-      g.effects.push({ u: lane, kind: res, t: performance.now() });
-    }
-
-    function hitNote(g, n, res, dt) {
-      if (dt < 0) g.early++;
-      else if (dt > 0) g.late++;
-      spawnEffect(g, n.lane, res);
-      playHit(n.type === "flick" ? "flick" : n.type === "drag" ? "drag" : "tap");
-      if (n.type === "hold") {
-        n.state = "active";
-        n.headResult = res;
-        n.lastHeld = songMs(g);
-        g.holds.push(n);
+        die();
         return;
       }
-      n.state = "done";
-      g.resolved++;
-      tally(g, res);
-    }
-
-    function missNote(g, n) {
-      n.state = "done";
-      g.resolved++;
-      tally(g, "miss");
-    }
-
-    function tapHit(g, p, ms) {
-      const u = localU(g, p.x, p.y);
-      let best = null;
-      let bestAdt = Infinity;
-      for (let i = g.lo; i < g.N; i++) {
-        const n = g.notes[i];
-        if (n.time - ms > 200) break;
-        if (n.state !== "wait" || (n.type !== "tap" && n.type !== "hold")) continue;
-        const adt = Math.abs(ms - n.time);
-        const limit = n.type === "tap" ? WIN.tap.bad : WIN.hold.good;
-        if (adt > limit || adt >= bestAdt || !inColumn(u, n.lane)) continue;
-        best = n;
-        bestAdt = adt;
-      }
-      if (!best) return false;
-      const res = judgeDelta(best.type, bestAdt);
-      if (!res) return false;
-      hitNote(g, best, res, ms - best.time);
-      return true;
-    }
-
-    function dragHit(g, p, ms) {
-      const u = localU(g, p.x, p.y);
-      for (let i = g.lo; i < g.N; i++) {
-        const n = g.notes[i];
-        if (n.time - ms > WIN.drag.perfect) break;
-        if (n.state !== "wait" || n.type !== "drag") continue;
-        const dt = ms - n.time;
-        if (Math.abs(dt) > WIN.drag.perfect || !inColumn(u, n.lane)) continue;
-        hitNote(g, n, "perfect", dt);
-        return;
+      const nearX = px + R + 14 > o.x && px - R - 14 < o.x + o.w;
+      if (!o.near && nearX && gap >= 0 && gap < 16) {
+        o.near = true;
+        w.near++;
+        w.score += 50;
+        text("БЛИЗКО +50", px, py - 36, "cyan");
+        burst(px, edge, "cyan", 8, 200);
+        sfx("near");
       }
     }
+  }
 
-    function flickHit(g, p, ms) {
-      const u = localU(g, p.x, p.y);
-      for (let i = g.lo; i < g.N; i++) {
-        const n = g.notes[i];
-        if (n.time - ms > 200) break;
-        if (n.state !== "wait" || n.type !== "flick") continue;
-        const dt = ms - n.time;
-        if (Math.abs(dt) > WIN.flick.perfect || !inColumn(u, n.lane)) continue;
-        hitNote(g, n, "perfect", dt);
-        return;
+  function updateFx(dt) {
+    w.parts.forEach(function (p) {
+      p.life += dt;
+      if (p.kind === "spark") {
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.vx *= Math.exp(-3 * dt);
+        p.vy *= Math.exp(-3 * dt);
       }
-    }
+    });
+    w.parts = w.parts.filter(function (p) { return p.life < p.max; });
+    w.texts.forEach(function (t) { t.life += dt; });
+    w.texts = w.texts.filter(function (t) { return t.life < t.max; });
+  }
 
-    function inputTick(g, ms) {
-      for (let i = g.lo; i < g.N; i++) {
-        const n = g.notes[i];
-        if (n.time - ms > 200) break;
-        if (n.state !== "wait") continue;
-        const dt = ms - n.time;
-        if (n.type === "drag") {
-          if (Math.abs(dt) <= WIN.drag.perfect && pointerInColumn(g, n.lane)) hitNote(g, n, "perfect", dt);
-          else if (dt > WIN.drag.perfect) missNote(g, n);
-        } else if (n.type === "flick") {
-          if (dt > WIN.flick.perfect) missNote(g, n);
-        } else if (n.type === "tap") {
-          if (dt > WIN.tap.bad) missNote(g, n);
-        } else if (dt > WIN.hold.good) {
-          missNote(g, n);
-        }
-      }
-      advanceLo(g);
+  function gameOver() {
+    st = "over";
+    musicStop();
+    sfx("over");
+    const score = Math.floor(w.score);
+    const isBest = score > best;
+    if (isBest) {
+      best = score;
+      writeVal(BEST_KEY, String(best));
     }
+    $("over-score").textContent = String(score);
+    $("over-gems").textContent = String(w.gems);
+    $("over-combo").textContent = "x" + w.maxCombo;
+    $("over-near").textContent = String(w.near);
+    $("over-note").textContent = isBest ? "НОВЫЙ РЕКОРД" : "Рекорд " + best;
+    setUI("over");
+  }
 
-    function autoTick(g, ms) {
-      for (let i = g.lo; i < g.N; i++) {
-        const n = g.notes[i];
-        if (n.time > ms) break;
-        if (n.state === "wait") hitNote(g, n, "perfect", 0);
-      }
-      advanceLo(g);
+  function setUI(view) {
+    ["menu", "pause", "over"].forEach(function (n) { $(n).classList.toggle("show", view === n); });
+    $("hud").classList.toggle("show", view === "play" || view === "pause");
+  }
+
+  function startGame() {
+    audioReady();
+    musicStart();
+    sfx("start");
+    w = newWorld();
+    st = "play";
+    setUI("play");
+  }
+
+  function pauseGame() {
+    if (st !== "play" || w.dying) return;
+    st = "pause";
+    setUI("pause");
+  }
+
+  function resumeGame() {
+    if (st !== "pause") return;
+    st = "play";
+    setUI("play");
+  }
+
+  function toMenu() {
+    st = "menu";
+    w = newWorld();
+    refreshMenu();
+    setUI("menu");
+  }
+
+  function refreshMenu() {
+    $("menu-best").textContent = best ? "Рекорд: " + best : "Рекорд пока не поставлен";
+  }
+
+  const hudCache = {};
+  function setText(id, s) {
+    if (hudCache[id] !== s) {
+      hudCache[id] = s;
+      $(id).textContent = s;
     }
+  }
 
-    function holdTick(g, ms) {
-      for (let k = g.holds.length - 1; k >= 0; k--) {
-        const n = g.holds[k];
-        if (ms >= n.endTime) {
-          n.state = "done";
-          g.resolved++;
-          tally(g, n.headResult);
-          g.holds.splice(k, 1);
-          continue;
-        }
-        if (settings.autoplay || pointerInColumn(g, n.lane)) {
-          n.lastHeld = ms;
-        } else if (ms - n.lastHeld > HOLD_GAP) {
-          n.state = "done";
-          g.resolved++;
-          tally(g, "miss");
-          g.holds.splice(k, 1);
-        }
-      }
-      advanceLo(g);
+  function updateHud() {
+    setText("score", String(Math.floor(w.score)));
+    setText("mult", "x" + w.mult);
+    $("shield-ind").classList.toggle("show", w.shield);
+    $("magnet-ind").classList.toggle("show", w.magnet > 0);
+  }
+
+  function glow(sprite, x, y, r, alpha) {
+    ctx.globalAlpha = alpha;
+    ctx.globalCompositeOperation = "lighter";
+    ctx.drawImage(sprite, x - r, y - r, r * 2, r * 2);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1;
+  }
+
+  function drawBackground() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#0b0620";
+    ctx.fillRect(0, 0, W, H);
+    if (bgReady) {
+      const sc = Math.max(W / bgImg.width, H / bgImg.height);
+      const dw = bgImg.width * sc;
+      const dh = bgImg.height * sc;
+      const ox = -((w.bgX * S * 0.5) % dw);
+      const oy = (H - dh) / 2;
+      ctx.drawImage(bgImg, ox, oy, dw, dh);
+      ctx.drawImage(bgImg, ox + dw, oy, dw, dh);
     }
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "rgba(11,6,32,0.25)");
+    g.addColorStop(1, "rgba(11,6,32,0.78)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
 
-    function finishGame(g) {
-      g.finished = true;
-      for (const n of g.notes) {
-        if (n.state !== "done") {
-          n.state = "done";
-          g.resolved++;
-          tally(g, "miss");
-        }
-      }
-      g.holds = [];
-      stopSource();
-      showResult(g);
+  function neon(y, color) {
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.28;
+    ctx.lineWidth = 12;
+    ctx.beginPath();
+    ctx.moveTo(-20, y);
+    ctx.lineTo(LW + 20, y);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-20, y);
+    ctx.lineTo(LW + 20, y);
+    ctx.stroke();
+  }
+
+  function drawTrack() {
+    const fg = ctx.createLinearGradient(0, FLOOR, 0, LH);
+    fg.addColorStop(0, "rgba(255,62,207,0.2)");
+    fg.addColorStop(1, "rgba(20,8,40,0.95)");
+    ctx.fillStyle = fg;
+    ctx.fillRect(-20, FLOOR, LW + 40, LH - FLOOR + 20);
+    const cg = ctx.createLinearGradient(0, 0, 0, CEIL);
+    cg.addColorStop(0, "rgba(20,8,40,0.95)");
+    cg.addColorStop(1, "rgba(63,243,255,0.2)");
+    ctx.fillStyle = cg;
+    ctx.fillRect(-20, -20, LW + 40, CEIL + 20);
+    const off = (w.bgX * 1.6) % 70;
+    ctx.globalCompositeOperation = "lighter";
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(255,62,207,0.16)";
+    ctx.beginPath();
+    for (let x = -off; x < LW + 70; x += 70) {
+      ctx.moveTo(x, FLOOR);
+      ctx.lineTo(x - 30, LH + 10);
     }
-
-    function endTick(g, ms) {
-      if (g.finished) return;
-      const allDone = g.resolved >= g.N;
-      if (ms >= g.durationMs + 200 || (allDone && ms > g.lastEnd + 1500)) finishGame(g);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(63,243,255,0.16)";
+    ctx.beginPath();
+    for (let x = -off; x < LW + 70; x += 70) {
+      ctx.moveTo(x, CEIL);
+      ctx.lineTo(x - 30, -10);
     }
+    ctx.stroke();
+    ctx.globalCompositeOperation = "source-over";
+    neon(FLOOR, COLORS.pink);
+    neon(CEIL, COLORS.cyan);
+    ctx.globalAlpha = 1;
+  }
 
-    function update(g) {
-      const ms = songMs(g);
-      g.ms = ms;
-      g.geo = geometry(g, ms);
-      if (settings.autoplay) autoTick(g, ms);
-      else inputTick(g, ms);
-      holdTick(g, ms);
-      endTick(g, ms);
+  function drawStars(t) {
+    ctx.globalCompositeOperation = "lighter";
+    stars.forEach(function (s) {
+      const x = (((s.x * LW - w.bgX * s.v * 3) % LW) + LW) % LW;
+      ctx.globalAlpha = 0.35 + 0.35 * Math.sin(t * 2 + s.p);
+      ctx.fillStyle = "#cfe9ff";
+      ctx.fillRect(x, s.y * LH, s.r, s.r);
+    });
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  function drawObstacle(o) {
+    const top = o.side > 0 ? FLOOR : CEIL;
+    const dir = o.side > 0 ? -1 : 1;
+    ctx.beginPath();
+    for (let i = 0; i < o.n; i++) {
+      const x0 = o.x + i * SPIKE_S;
+      ctx.moveTo(x0, top);
+      ctx.lineTo(x0 + SPIKE_S / 2, top + dir * SPIKE_H);
+      ctx.lineTo(x0 + SPIKE_S, top);
     }
+    ctx.fillStyle = "#ff4d6d";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    glow(GLOW.pink, o.x + o.w / 2, top + dir * SPIKE_H * 0.35, o.w * 0.55, 0.35);
+  }
 
-    function drawChevrons(x0, w, v, bh, color) {
-      const h = bh * 0.55;
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 2.5;
-      ctx.lineJoin = "round";
-      for (let k = 0; k < 2; k++) {
-        const tl = x0 - 4 - k * 6;
-        const tr = x0 + w + 4 + k * 6;
-        ctx.beginPath();
-        ctx.moveTo(tl + 5, v - h);
-        ctx.lineTo(tl, v);
-        ctx.lineTo(tl + 5, v + h);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(tr - 5, v - h);
-        ctx.lineTo(tr, v);
-        ctx.lineTo(tr - 5, v + h);
-        ctx.stroke();
-      }
-    }
-
-    function drawBar(n, x0, w, v, kind, bh) {
-      const color = kind === "drag" ? COLORS.drag : kind === "flick" ? COLORS.flick : COLORS.tap;
+  function drawPick(k, t) {
+    const y = k.y + Math.sin(t * 4 + k.spin) * 2;
+    if (k.kind === "gem") {
+      glow(GLOW.gold, k.x, y, 26, 0.7);
+      ctx.save();
+      ctx.translate(k.x, y);
+      ctx.rotate(Math.sin(t * 2.5 + k.spin) * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(0, -11);
+      ctx.lineTo(8, 0);
+      ctx.lineTo(0, 11);
+      ctx.lineTo(-8, 0);
+      ctx.closePath();
+      ctx.fillStyle = COLORS.gold;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(0, -5);
+      ctx.lineTo(3, 0);
+      ctx.lineTo(0, 5);
+      ctx.lineTo(-3, 0);
+      ctx.closePath();
+      ctx.fillStyle = "#fff8d6";
+      ctx.fill();
+      ctx.restore();
+    } else if (k.kind === "shield") {
+      glow(GLOW.blue, k.x, y, 34, 0.8);
+      ctx.beginPath();
+      ctx.arc(k.x, y, 12, 0, Math.PI * 2);
+      ctx.fillStyle = "#1c3c8a";
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = COLORS.blue;
+      ctx.stroke();
+      ctx.save();
+      ctx.setLineDash([5, 5]);
+      ctx.lineDashOffset = -t * 30;
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#9cc4ff";
+      ctx.beginPath();
+      ctx.arc(k.x, y, 19, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    } else {
+      glow(GLOW.violet, k.x, y, 34, 0.8);
+      ctx.beginPath();
+      ctx.arc(k.x, y, 12, 0, Math.PI * 2);
+      ctx.fillStyle = "#2a1959";
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = COLORS.violet;
+      ctx.stroke();
       ctx.fillStyle = "#ffffff";
-      ctx.fillRect(x0 - 2, v - bh / 2 - 2, w + 4, bh + 4);
-      ctx.fillStyle = color;
-      ctx.fillRect(x0, v - bh / 2, w, bh);
-      if (kind === "flick") {
-        const mx = x0 + w / 2;
-        const r = bh * 0.85;
-        ctx.fillStyle = "#ffffff";
-        ctx.beginPath();
-        ctx.moveTo(mx, v - r);
-        ctx.lineTo(mx + r * 0.7, v);
-        ctx.lineTo(mx, v + r);
-        ctx.lineTo(mx - r * 0.7, v);
-        ctx.closePath();
-        ctx.fill();
-      } else if (kind === "tap") {
-        ctx.fillStyle = "rgba(255,255,255,0.75)";
-        ctx.fillRect(x0 + 6, v - 1.5, w - 12, 3);
-      }
-      if (kind !== "flick") drawChevrons(x0, w, v, bh, color);
-      if (n.chord) {
-        ctx.strokeStyle = COLORS.gold;
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x0 - 6, v - bh / 2 - 6, w + 12, bh + 12);
-      }
+      ctx.font = "800 14px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("M", k.x, y + 1);
     }
+  }
 
-    function drawNote(g, n, ms, geo, bh) {
-      const x0 = (n.lane - NOTE_HALF) * geo.Lx;
-      const w = NOTE_HALF * 2 * geo.Lx;
-      const fNow = floorOf(g, ms);
-      const vHead = -n.side * (floorOf(g, n.time) - fNow) * 0.6 * H;
-      if (n.type === "hold") {
-        const vTail = -n.side * (floorOf(g, n.endTime) - fNow) * 0.6 * H;
-        const a = n.state === "active" ? 0 : vHead;
-        const top = Math.min(a, vTail);
-        const bot = Math.max(a, vTail);
-        const grad = ctx.createLinearGradient(0, top, 0, bot);
-        grad.addColorStop(0, "rgba(160,235,255,0.12)");
-        grad.addColorStop(1, "rgba(160,235,255,0.8)");
-        ctx.fillStyle = grad;
-        ctx.fillRect(x0, top, w, Math.max(1, bot - top));
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 2.5;
-        ctx.strokeRect(x0, top, w, Math.max(1, bot - top));
-        if (n.state === "wait") drawBar(n, x0, w, vHead, "tap", bh);
-        return;
-      }
-      drawBar(n, x0, w, vHead, n.type, bh);
-    }
-
-    function drawEffects(g, geo) {
-      const now = performance.now();
-      g.effects = g.effects.filter(function (e) { return now - e.t < EFFECT_MS; });
-      for (const e of g.effects) {
-        const k = (now - e.t) / EFFECT_MS;
-        const ex = e.u * geo.Lx;
-        const color = e.kind === "perfect" ? COLORS.gold : COLORS.blue;
-        ctx.globalAlpha = 1 - k;
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        const s = 14 + 70 * k;
-        ctx.strokeRect(ex - s / 2, -s / 2, s, s);
-        ctx.fillStyle = color;
-        for (let j = 0; j < 6; j++) {
-          const ang = (j * Math.PI) / 3 + 0.35;
-          const dist = 6 + 60 * k;
-          ctx.fillRect(ex + Math.cos(ang) * dist - 3, Math.sin(ang) * dist - 3, 6, 6);
-        }
-      }
+  function drawPlayer(t) {
+    const p = w.p;
+    const x = PX();
+    const gk = p.dir > 0 ? "cyan" : "pink";
+    glow(GLOW[gk], x, p.y, 58, 0.9);
+    const sx = 1 + p.squash * 0.35;
+    const sy = 1 - p.squash * 0.25;
+    ctx.save();
+    ctx.translate(x, p.y);
+    ctx.scale(sx, sy);
+    ctx.beginPath();
+    ctx.arc(0, 0, R, 0, Math.PI * 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = COLORS[gk];
+    ctx.stroke();
+    ctx.restore();
+    if (p.ring > 0) {
+      ctx.globalAlpha = p.ring;
+      ctx.strokeStyle = COLORS[gk];
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, p.y, R + (1 - p.ring) * 42, 0, Math.PI * 2);
+      ctx.stroke();
       ctx.globalAlpha = 1;
     }
+    if (w.shield) {
+      glow(GLOW.blue, x, p.y, 40, 0.5);
+      ctx.beginPath();
+      ctx.arc(x, p.y, R + 11 + Math.sin(t * 8) * 1.5, 0, Math.PI * 2);
+      ctx.strokeStyle = COLORS.blue;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+  }
 
-    const bgImg = new Image();
-    let bgReady = false;
-    bgImg.onload = function () { bgReady = true; };
-    bgImg.src = "assets/bg.jpg";
-
-    function draw(g) {
-      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-      ctx.clearRect(0, 0, W, H);
-      if (bgReady) {
-        ctx.drawImage(bgImg, 0, 0, W, H);
-        ctx.fillStyle = "rgba(8,7,16,0.6)";
-        ctx.fillRect(0, 0, W, H);
+  function drawFx() {
+    w.parts.forEach(function (p) {
+      const k = p.life / p.max;
+      if (p.kind === "ring") {
+        ctx.globalAlpha = (1 - k) * 0.9;
+        ctx.strokeStyle = COLORS[p.g];
+        ctx.lineWidth = 3 * (1 - k) + 0.5;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r + k * 90, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
       } else {
-        const grad = ctx.createLinearGradient(0, 0, 0, H);
-        grad.addColorStop(0, "#0c0b18");
-        grad.addColorStop(1, "#1a1430");
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, W, H);
+        glow(GLOW[p.g], p.x, p.y, p.size * (1 - k * 0.6), 1 - k);
       }
-      if (!g) return;
-      const ms = g.ms;
-      const geo = g.geo;
-      const bh = Math.max(15, H * 0.026);
-      const lc = lineColor(g.counts);
-      ctx.save();
-      ctx.translate(geo.cx, geo.cy);
-      ctx.rotate(geo.ang);
-      ctx.shadowColor = lc;
-      ctx.shadowBlur = 12 * DPR;
-      ctx.fillStyle = lc;
-      ctx.fillRect(-geo.Lx / 2, -3, geo.Lx, 6);
-      ctx.shadowBlur = 0;
-      const look = 3000 / settings.flow;
-      for (let i = g.lo; i < g.N; i++) {
-        const n = g.notes[i];
-        if (n.time - ms > look) break;
-        if (n.state === "done") continue;
-        drawNote(g, n, ms, geo, bh);
+    });
+    ctx.font = "800 22px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    w.texts.forEach(function (t) {
+      const k = t.life / t.max;
+      ctx.globalAlpha = 1 - k;
+      ctx.fillStyle = COLORS[t.g];
+      ctx.fillText(t.str, t.x, t.y - k * 34);
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  function render(t) {
+    drawBackground();
+    ctx.setTransform(dpr * S, 0, 0, dpr * S, 0, 0);
+    if (w.shake > 0) ctx.translate(rand(-w.shake, w.shake), rand(-w.shake, w.shake));
+    drawStars(t);
+    drawTrack();
+    w.obs.forEach(drawObstacle);
+    w.pick.forEach(function (k) { drawPick(k, t); });
+    drawPlayer(t);
+    drawFx();
+    if (w.flash > 0) {
+      ctx.fillStyle = "rgba(255,255,255," + (w.flash * 0.45).toFixed(3) + ")";
+      ctx.fillRect(-60, -60, LW + 120, LH + 120);
+    }
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+    if (st === "play" && H > W) pauseGame();
+    if (st === "play") {
+      const k = w.dying ? 0.3 : 1;
+      updatePlayer(dt * k);
+      if (!w.dying) {
+        updateWorld(dt);
+        spawnAhead();
+        checkPicks();
+        checkObstacles();
+      } else {
+        w.deadT += dt;
+        if (w.deadT > 1.1) gameOver();
       }
-      drawEffects(g, geo);
-      ctx.restore();
+      updateFx(dt * k);
+      w.flash = Math.max(0, w.flash - dt * 1.5);
+      w.shake = Math.max(0, w.shake - dt * 50);
+      updateHud();
+    } else {
+      w.bgX += dt * 40;
+      updateFx(dt);
     }
-
-    function updateHud(g) {
-      const p = Math.min(1, Math.max(0, g.ms) / g.durationMs);
-      el("progress").style.transform = "scaleX(" + p.toFixed(4) + ")";
-      setText("score", pad7(computeScore(g.counts, g.N, g.maxCombo)));
-      setText("combo", String(g.combo));
-      el("combo-box").classList.toggle("show", g.combo >= 3);
-    }
-
-    function frame() {
-      requestAnimationFrame(frame);
-      if (!game) return;
-      if (!game.paused && !game.finished) update(game);
-      draw(game);
-      updateHud(game);
-    }
-
-    function beginGame(id, chart) {
-      const a = ensureAudio();
-      stopSource();
-      const buf = buffers[id];
-      const notes = cloneNotes(chart.notes);
-      const src = a.ctx.createBufferSource();
-      src.buffer = buf;
-      src.connect(a.music);
-      const t0 = a.ctx.currentTime + LEAD_IN;
-      src.start(t0);
-      let lastEnd = 0;
-      for (const n of notes) {
-        if (n.endTime > lastEnd) lastEnd = n.endTime;
-      }
-      game = {
-        id: id,
-        diff: settings.diff,
-        chartNotes: chart.notes,
-        lines: chart.lines,
-        notes: notes,
-        N: notes.length,
-        an: chart.an,
-        durationMs: buf.duration * 1000,
-        counts: { perfect: 0, good: 0, bad: 0, miss: 0 },
-        combo: 0,
-        maxCombo: 0,
-        early: 0,
-        late: 0,
-        lo: 0,
-        resolved: 0,
-        lastEnd: lastEnd,
-        holds: [],
-        pointers: new Map(),
-        effects: [],
-        paused: false,
-        finished: false,
-        src: src,
-        t0: t0,
-        ms: -LEAD_IN * 1000,
-        geo: null
-      };
-      game.geo = geometry(game, game.ms);
-      el("track-name").textContent = trackNames[id];
-      el("diff-name").textContent = DIFFS[settings.diff].label;
-      setScreen("game");
-    }
-
-    async function startFromMenu() {
-      const btn = el("play-btn");
-      btn.disabled = true;
-      const id = settings.track;
-      el("load-track").textContent = trackNames[id] + " · " + DIFFS[settings.diff].label;
-      el("load-msg").textContent = "Загрузка трека…";
-      el("load-fill").style.width = "15%";
-      setScreen("loading");
-      try {
-        ensureAudio();
-        await loadTrack(id);
-        el("load-fill").style.width = "60%";
-        el("load-msg").textContent = "Анализ трека и генерация чарта…";
-        await new Promise(function (r) { setTimeout(r, 30); });
-        const chart = getChart(id, settings.diff);
-        el("load-fill").style.width = "100%";
-        setStatus("");
-        beginGame(id, chart);
-      } catch (err) {
-        setScreen("menu");
-        setStatus("Ошибка: " + err.message);
-      } finally {
-        btn.disabled = false;
-      }
-    }
-
-    function pauseGame() {
-      if (!game || game.paused || game.finished) return;
-      game.paused = true;
-      game.pointers.clear();
-      audio.ctx.suspend();
-      setScreen("pause");
-    }
-
-    function resumeGame() {
-      if (!game || !game.paused) return;
-      game.paused = false;
-      audio.ctx.resume();
-      setScreen("game");
-    }
-
-    function restartGame() {
-      if (!game) return;
-      beginGame(game.id, { notes: game.chartNotes, lines: game.lines, an: game.an, durationMs: game.durationMs });
-    }
-
-    function quitGame() {
-      stopSource();
-      game = null;
-      setScreen("menu");
-      syncMenu();
-    }
-
-    function showResult(g) {
-      const score = computeScore(g.counts, g.N, g.maxCombo);
-      const rank = rankOf(g.counts, g.N, score);
-      const rankEl = el("res-rank");
-      rankEl.textContent = rank.label;
-      rankEl.style.color = rank.color;
-      el("res-score").textContent = pad7(score);
-      const acc = g.N ? ((g.counts.perfect + g.counts.good * 0.65) / g.N) * 100 : 0;
-      el("res-acc").textContent = acc.toFixed(2) + "%";
-      el("res-combo").textContent = String(g.maxCombo);
-      el("res-p").textContent = String(g.counts.perfect);
-      el("res-g").textContent = String(g.counts.good);
-      el("res-b").textContent = String(g.counts.bad);
-      el("res-m").textContent = String(g.counts.miss);
-      el("res-early").textContent = String(g.early);
-      el("res-late").textContent = String(g.late);
-      el("res-track").textContent = trackNames[g.id] + " · " + DIFFS[g.diff].label;
-      el("res-cover").src = covers[g.id] || covers.custom;
-      const key = bestKey(g.id, g.diff);
-      const best = loadBest();
-      const prev = best[key];
-      const isNew = !settings.autoplay && (!prev || score > prev.score);
-      if (isNew) {
-        best[key] = { score: score, acc: acc, rank: rank.label };
-        try {
-          localStorage.setItem(BEST_KEY, JSON.stringify(best));
-        } catch (e) {}
-      }
-      el("res-newbest").textContent = settings.autoplay ? "AutoPlay · рекорд не сохраняется" : isNew ? (prev ? "НОВЫЙ РЕКОРД  ·  прошлый " + pad7(prev.score) : "ПЕРВЫЙ РЕЗУЛЬТАТ") : "Лучший результат " + pad7(prev.score);
-      setScreen("result");
-    }
-
-    function onDown(e) {
-      if (!game || game.paused || game.finished) return;
-      e.preventDefault();
-      const p = { x: e.clientX, y: e.clientY, acc: 0 };
-      game.pointers.set(e.pointerId, p);
-      if (!settings.autoplay && !tapHit(game, p, songMs(game))) dragHit(game, p, songMs(game));
-    }
-
-    function onMove(e) {
-      if (!game || game.paused || game.finished || settings.autoplay) return;
-      const p = game.pointers.get(e.pointerId);
-      if (!p) return;
-      const dx = e.clientX - p.x;
-      const dy = e.clientY - p.y;
-      p.x = e.clientX;
-      p.y = e.clientY;
-      p.acc += Math.sqrt(dx * dx + dy * dy);
-      if (p.acc >= 6) {
-        p.acc = 0;
-        flickHit(game, p, songMs(game));
-      }
-    }
-
-    function onUp(e) {
-      if (game) game.pointers.delete(e.pointerId);
-    }
-
-    canvas.addEventListener("pointerdown", onDown);
-    canvas.addEventListener("pointermove", onMove);
-    canvas.addEventListener("pointerup", onUp);
-    canvas.addEventListener("pointercancel", onUp);
-    canvas.addEventListener("contextmenu", function (e) { e.preventDefault(); });
-
-    el("play-btn").addEventListener("click", startFromMenu);
-    el("pause-btn").addEventListener("click", pauseGame);
-    el("resume").addEventListener("click", resumeGame);
-    el("restart").addEventListener("click", restartGame);
-    el("quit").addEventListener("click", quitGame);
-    el("res-replay").addEventListener("click", restartGame);
-    el("res-menu").addEventListener("click", quitGame);
-
-    document.querySelectorAll(".track-btn").forEach(function (b) {
-      b.addEventListener("click", function () {
-        settings.track = b.dataset.track;
-        persist();
-        syncMenu();
-      });
-    });
-    document.querySelectorAll(".diff-btn").forEach(function (b) {
-      b.addEventListener("click", function () {
-        settings.diff = b.dataset.diff;
-        persist();
-        syncMenu();
-      });
-    });
-    el("custom-btn").addEventListener("click", function () {
-      el("file").click();
-    });
-    function offsetOf(json, info) {
-      if (json.META && typeof json.META.offset === "number") return json.META.offset;
-      return Number(info.Offset) || 0;
-    }
-    async function importPez(f) {
-      const zip = readZip(new Uint8Array(await f.arrayBuffer()));
-      const infoBytes = await unzipEntry(zip, "info.txt");
-      if (!infoBytes) throw new Error("в .pez нет info.txt");
-      const info = parsePezInfo(new TextDecoder("utf-8").decode(infoBytes));
-      const chartBytes = info.Chart ? await unzipEntry(zip, info.Chart) : null;
-      const songBytes = info.Song ? await unzipEntry(zip, info.Song) : null;
-      if (!chartBytes || !songBytes) throw new Error("в .pez не хватает чарта или музыки");
-      const picBytes = info.Picture ? await unzipEntry(zip, info.Picture) : null;
-      const json = JSON.parse(new TextDecoder("utf-8").decode(chartBytes));
-      const picUrl = picBytes ? URL.createObjectURL(new Blob([picBytes], { type: /\.png$/i.test(info.Picture) ? "image/png" : "image/jpeg" })) : null;
-      return { info: info, json: json, song: songBytes, level: pezLevel(info.Level), picUrl: picUrl };
-    }
-    el("file").addEventListener("change", async function (e) {
-      const input = e.target;
-      const f = input.files && input.files[0];
-      if (!f) return;
-      try {
-        const a = ensureAudio();
-        setStatus("Открываю " + f.name + "…");
-        if (/\.pez$/i.test(f.name)) {
-          const pz = await importPez(f);
-          buffers.custom = await decodeData(a.ctx, toBuffer(pz.song));
-          const durationMs = buffers.custom.duration * 1000;
-          const offsetMs = offsetOf(pz.json, pz.info);
-          pezState = {
-            key: pz.level.key,
-            num: pz.level.num,
-            family: pz.level.family,
-            chart: buildPezChart(pz.json, offsetMs, durationMs, pz.level.key)
-          };
-          trackNames.custom = pz.info.Name || f.name;
-          if (covers.custom.indexOf("blob:") === 0) URL.revokeObjectURL(covers.custom);
-          covers.custom = pz.picUrl || "assets/bg.jpg";
-          settings.track = "custom";
-          settings.diff = pezState.key;
-          persist();
-          syncMenu();
-          setStatus("Файл загружен: " + trackNames.custom + " · " + pz.info.Level + ", сложность одна (из файла)");
-        } else {
-          buffers.custom = await decodeData(a.ctx, await f.arrayBuffer());
-          trackNames.custom = f.name;
-          pezState = null;
-          if (covers.custom.indexOf("blob:") === 0) URL.revokeObjectURL(covers.custom);
-          covers.custom = "assets/bg.jpg";
-          settings.track = "custom";
-          persist();
-          syncMenu();
-          setStatus("Файл загружен: " + f.name);
-        }
-      } catch (err) {
-        setStatus("Не удалось открыть файл: " + err.message);
-      }
-      input.value = "";
-    });
-    el("settings-btn").addEventListener("click", function () {
-      el("menu").classList.add("settings-open");
-    });
-    el("settings-close").addEventListener("click", function () {
-      el("menu").classList.remove("settings-open");
-    });
-    el("flow").addEventListener("input", function (e) {
-      settings.flow = parseFloat(e.target.value);
-      persist();
-      syncMenu();
-    });
-    el("offset").addEventListener("input", function (e) {
-      settings.offset = parseInt(e.target.value, 10);
-      persist();
-      syncMenu();
-    });
-    el("sfx").addEventListener("change", function (e) {
-      settings.sfx = e.target.checked;
-      persist();
-    });
-    el("rotation").addEventListener("change", function (e) {
-      settings.rotation = e.target.checked;
-      persist();
-    });
-    el("autoplay").addEventListener("change", function (e) {
-      settings.autoplay = e.target.checked;
-      persist();
-    });
-    document.addEventListener("visibilitychange", function () {
-      if (document.hidden) pauseGame();
-    });
-
-    syncMenu();
-    setScreen("menu");
+    render(now / 1000);
     requestAnimationFrame(frame);
   }
 
-  if (typeof module !== "undefined" && module.exports) {
-    module.exports = {
-      detectOnsets: detectOnsets,
-      estimateTempo: estimateTempo,
-      analyzeBuffer: analyzeBuffer,
-      generateChart: generateChart,
-      makeLines: makeLines,
-      evalTrack: evalTrack,
-      floorAt: floorAt,
-      judgeDelta: judgeDelta,
-      computeScore: computeScore,
-      rankOf: rankOf,
-      lineColor: lineColor,
-      synthChrono: synthChrono
-    };
-  }
+  $("play-btn").addEventListener("click", startGame);
+  $("retry-btn").addEventListener("click", startGame);
+  $("pause-btn").addEventListener("click", pauseGame);
+  $("resume-btn").addEventListener("click", resumeGame);
+  $("pause-menu-btn").addEventListener("click", toMenu);
+  $("over-menu-btn").addEventListener("click", toMenu);
+  $("sound-btn").addEventListener("click", toggleSound);
 
-  if (typeof document !== "undefined" && document.getElementById("game")) init();
+  $("app").addEventListener("pointerdown", function (e) {
+    if (e.target.closest && e.target.closest("button")) return;
+    flip();
+  });
+
+  window.addEventListener("keydown", function (e) {
+    if (e.code === "Space" || e.code === "ArrowUp" || e.code === "KeyW") {
+      e.preventDefault();
+      if (st === "play") flip();
+      else if (st === "menu") startGame();
+    } else if (e.code === "Escape") {
+      if (st === "play") pauseGame();
+      else if (st === "pause") resumeGame();
+    }
+  });
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden && st === "play") pauseGame();
+  });
+
+  window.addEventListener("resize", resize);
+
+  resize();
+  w = newWorld();
+  refreshSoundLabel();
+  refreshMenu();
+  setUI("menu");
+  requestAnimationFrame(frame);
 })();
