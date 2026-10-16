@@ -43,3 +43,35 @@ h2{margin:0 0 12px}
 
 .load-bar{margin-top:14px;height:6px;border-radius:3px;background:rgba(255,255,255,.12);overflow:hidden}
 #load-fill{height:100%;width:0;background:linear-gradient(90deg,#a98bff,#48e5ff);transition:width .35s ease}
+
+.panel{position:relative;max-width:520px;padding:28px 28px 24px;border-radius:22px;background:linear-gradient(160deg,rgba(30,24,58,.82),rgba(12,10,26,.86));box-shadow:0 30px 80px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.07);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:0}
+.panel::before{content:"";position:absolute;inset:0;border-radius:22px;padding:1px;background:linear-gradient(135deg,rgba(180,140,255,.75),rgba(72,229,255,.12) 50%,rgba(180,140,255,.45));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
+.panel.small{max-width:340px}
+h1{font-size:34px;font-weight:800;letter-spacing:.5px;background:linear-gradient(90deg,#ffffff,#d6c4ff 50%,#7fe9ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{margin:2px 0 18px;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#9d8fd0}
+.label{margin-bottom:10px;font-size:11px;letter-spacing:2.5px;color:#8f80c4}
+.track-btn{display:block;width:100%;text-align:left;padding:12px 16px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);font-size:15px;color:#e8e6f5;transition:background .18s,border-color .18s,transform .12s}
+.track-btn:hover{background:rgba(255,255,255,.08)}
+.track-btn.on{background:linear-gradient(90deg,rgba(143,107,255,.38),rgba(72,229,255,.12));border-color:rgba(180,140,255,.85);color:#fff;font-weight:700;box-shadow:0 0 22px rgba(143,107,255,.22)}
+.row{gap:10px}
+#custom-btn{background:transparent;border-style:dashed;border-color:rgba(180,140,255,.5);color:#cfc2ff}
+.diff-btn{flex:1 1 0;min-width:0;padding:11px 6px;border-radius:12px;text-align:center;font-weight:600;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1)}
+.diff-btn.on{background:linear-gradient(90deg,#9b7bff,#6fe3ff);border-color:transparent;color:#0c0b18;font-weight:800;box-shadow:0 6px 20px rgba(111,227,255,.25)}
+.chip.on{background:linear-gradient(90deg,#9b7bff,#6fe3ff);color:#0c0b18}
+.slider{margin:14px 0 12px;font-size:14px;color:#d7d3ea}
+.slider span{font-weight:700;font-variant-numeric:tabular-nums}
+input[type=range]{-webkit-appearance:none;appearance:none;height:6px;border-radius:3px;background:rgba(255,255,255,.14);outline:none;margin-top:12px;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 0 0 4px rgba(143,107,255,.35),0 2px 8px rgba(0,0,0,.4)}
+input[type=range]::-moz-range-thumb{width:18px;height:18px;border:0;border-radius:50%;background:#fff;box-shadow:0 0 0 4px rgba(143,107,255,.35)}
+input[type=range]:focus-visible{box-shadow:0 0 0 3px rgba(111,227,255,.5)}
+.toggles label{display:flex;align-items:center;gap:12px;margin:12px 0;font-size:15px;color:#e4e0f5;cursor:pointer}
+.toggles input[type=checkbox]{-webkit-appearance:none;appearance:none;position:relative;flex:0 0 auto;width:44px;height:24px;margin:0;border-radius:12px;background:rgba(255,255,255,.16);cursor:pointer;transition:background .2s}
+.toggles input[type=checkbox]::before{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.35);transition:transform .2s}
+.toggles input[type=checkbox]:checked{background:linear-gradient(90deg,#8f6bff,#48e5ff)}
+.toggles input[type=checkbox]:checked::before{transform:translateX(20px)}
+.play{margin-top:20px;padding:16px;border-radius:16px;font-size:17px;letter-spacing:.5px;box-shadow:0 12px 32px rgba(111,227,255,.28),0 0 0 1px rgba(255,255,255,.08) inset;transition:transform .12s,filter .15s,box-shadow .2s}
+.play:hover{filter:brightness(1.07);box-shadow:0 14px 40px rgba(111,227,255,.38)}
+.play:active{transform:translateY(1px) scale(.99)}
+button:focus-visible,input:focus-visible{outline:2px solid #6fe3ff;outline-offset:2px}
+#status{font-size:13px}
+.screen{padding:20px}
