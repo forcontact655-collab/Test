@@ -15,7 +15,9 @@
       <div class="honey-box">
         <span id="honey">0</span>
         <small id="rate">+0/с</small>
+        <small id="click-info">Тап +1</small>
       </div>
+      <div id="buff" class="buff hidden"></div>
       <div class="pills">
         <button id="royal-btn" class="pill" type="button" disabled>Новый рой</button>
         <button id="sound-btn" class="pill" type="button">Звук: вкл</button>
@@ -26,15 +28,21 @@
       <div class="shop-head">
         <div>
           <b>Улей</b>
-          <small id="stats">Пчёл 1 · Цветов 3</small>
+          <small id="stats">Пчёл 1</small>
         </div>
         <div class="modes">
           <button class="mode on" type="button" data-mode="1">x1</button>
           <button class="mode" type="button" data-mode="10">x10</button>
           <button class="mode" type="button" data-mode="100">x100</button>
+          <button class="mode" type="button" data-mode="0">MAX</button>
         </div>
       </div>
-      <div id="items"></div>
+      <div id="scroll">
+        <div class="sec-title" id="ups-title">Улучшения</div>
+        <div id="ups"></div>
+        <div class="sec-title">Производство</div>
+        <div id="items"></div>
+      </div>
     </aside>
 
     <div id="toasts"></div>
