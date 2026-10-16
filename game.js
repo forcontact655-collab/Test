@@ -724,10 +724,24 @@
         best = n;
         bestAdt = adt;
       }
-      if (!best) return;
+      if (!best) return false;
       const res = judgeDelta(best.type, bestAdt);
-      if (!res) return;
+      if (!res) return false;
       hitNote(g, best, res, ms - best.time);
+      return true;
+    }
+
+    function dragHit(g, p, ms) {
+      const u = localU(g, p.x, p.y);
+      for (let i = g.lo; i < g.N; i++) {
+        const n = g.notes[i];
+        if (n.time - ms > WIN.drag.perfect) break;
+        if (n.state !== "wait" || n.type !== "drag") continue;
+        const dt = ms - n.time;
+        if (Math.abs(dt) > WIN.drag.perfect || !inColumn(u, n.lane)) continue;
+        hitNote(g, n, "perfect", dt);
+        return;
+      }
     }
 
     function flickHit(g, p, ms) {
@@ -1104,7 +1118,7 @@
       e.preventDefault();
       const p = { x: e.clientX, y: e.clientY, acc: 0 };
       game.pointers.set(e.pointerId, p);
-      if (!settings.autoplay) tapHit(game, p, songMs(game));
+      if (!settings.autoplay && !tapHit(game, p, songMs(game))) dragHit(game, p, songMs(game));
     }
 
     function onMove(e) {
