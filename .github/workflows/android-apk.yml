@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: apk-${{ github.ref }}
@@ -87,3 +87,16 @@ jobs:
           path: ${{ runner.temp }}/app/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish APK release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apk=${{ runner.temp }}/app/android/app/build/outputs/apk/debug/app-debug.apk
+          cp "$apk" "$RUNNER_TEMP/test-game-debug.apk"
+          gh release delete apk-latest --cleanup-tag --yes || true
+          gh release create apk-latest "$RUNNER_TEMP/test-game-debug.apk" \
+            --title "Test APK (последняя сборка)" \
+            --notes "Сборка из коммита ${GITHUB_SHA:0:7} (${GITHUB_REF_NAME}). Обновляется при каждом пуше в ветки arena." \
+            --prerelease \
+            --target "$GITHUB_SHA"
