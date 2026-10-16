@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0c0b18">
+  <title>Phigros Web · X-Edition</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="hud">
+    <div id="progress"></div>
+    <button id="pause-btn" type="button" aria-label="Пауза">||</button>
+    <div id="combo-box"><div id="combo">0</div><div id="combo-label">COMBO</div></div>
+    <div id="score">0000000</div>
+    <div id="track-name"></div>
+    <div id="diff-name"></div>
+  </div>
+
+  <section id="menu" class="screen">
+    <div class="panel">
+      <h1>Phigros Web</h1>
+      <p class="sub">X-Edition</p>
+
+      <div class="block">
+        <div class="label">Трек</div>
+        <div class="row">
+          <button class="track-btn chip" type="button" data-track="track">Somewhat_empty — Track</button>
+          <button class="track-btn chip" type="button" data-track="chrono">Chronostasis — 160 BPM</button>
+          <button id="custom-btn" class="chip" type="button">Свой аудиофайл…</button>
+          <input id="file" type="file" accept="audio/*" hidden>
+        </div>
+      </div>
+
+      <div class="block">
+        <div class="label">Сложность</div>
+        <div class="row">
+          <button class="diff-btn chip" type="button" data-diff="EZ">EZ Lv.6</button>
+          <button class="diff-btn chip" type="button" data-diff="HD">HD Lv.11</button>
+          <button class="diff-btn chip" type="button" data-diff="IN14">IN Lv.14</button>
+          <button class="diff-btn chip" type="button" data-diff="IN15">IN Lv.15</button>
+        </div>
+      </div>
+
+      <div class="block">
+        <label class="slider">Скорость нот <span id="flow-val"></span>
+          <input id="flow" type="range" min="0.6" max="1.8" step="0.1">
+        </label>
+        <label class="slider">Задержка звука <span id="offset-val"></span>
+          <input id="offset" type="range" min="-150" max="150" step="5">
+        </label>
+      </div>
+
+      <div class="block toggles">
+        <label><input id="sfx" type="checkbox"> Звук ударов</label>
+        <label><input id="rotation" type="checkbox"> Вращение линии</label>
+        <label><input id="autoplay" type="checkbox"> AutoPlay (φ Демо)</label>
+      </div>
+
+      <button id="play-btn" class="play" type="button">Играть</button>
+      <div id="status"></div>
+    </div>
+  </section>
+
+  <section id="pause" class="screen hidden">
+    <div class="panel small">
+      <h2>Пауза</h2>
+      <button id="resume" class="play" type="button">Продолжить</button>
+      <button id="restart" class="chip wide" type="button">Переиграть</button>
+      <button id="quit" class="chip wide" type="button">В меню</button>
+    </div>
+  </section>
+
+  <section id="result" class="screen hidden">
+    <div class="panel">
+      <div id="res-track" class="sub"></div>
+      <div id="res-rank">F</div>
+      <div id="res-score">0000000</div>
+      <div class="grid">
+        <div>Accuracy</div><div id="res-acc">0.00%</div>
+        <div>Max Combo</div><div id="res-combo">0</div>
+        <div>Perfect</div><div id="res-p">0</div>
+        <div>Good</div><div id="res-g">0</div>
+        <div>Bad</div><div id="res-b">0</div>
+        <div>Miss</div><div id="res-m">0</div>
+        <div>Early</div><div id="res-early">0</div>
+        <div>Late</div><div id="res-late">0</div>
+      </div>
+      <button id="res-replay" class="play" type="button">Переиграть</button>
+      <button id="res-menu" class="chip wide" type="button">В меню</button>
+    </div>
+  </section>
+
+  <script src="game.js"></script>
+</body>
+</html>
