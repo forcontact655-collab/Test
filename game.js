@@ -1,10 +1,10 @@
 "use strict";
 (function () {
   const DIFFS = {
-    EZ: { label: "EZ Lv.6", keep: 0.35, gap: 380, side: 0 },
-    HD: { label: "HD Lv.11", keep: 0.6, gap: 220, side: 0 },
-    IN14: { label: "IN Lv.14", keep: 0.8, gap: 140, side: 0.2 },
-    IN15: { label: "IN Lv.15", keep: 1, gap: 95, side: 0.3 }
+    EZ: { label: "EZ Lv.6", density: 1.0, minGap: 500, grid: 4, pHold: 0.4, pDrag: 0.15, pFlick: 0.2, pChord: 0, side: 0, rot: 14, mv: 0.8 },
+    HD: { label: "HD Lv.11", density: 1.8, minGap: 300, grid: 4, pHold: 0.35, pDrag: 0.3, pFlick: 0.35, pChord: 0.15, side: 0, rot: 20, mv: 1.1 },
+    IN14: { label: "IN Lv.14", density: 3.0, minGap: 180, grid: 8, pHold: 0.25, pDrag: 0.45, pFlick: 0.4, pChord: 0.3, side: 0.12, rot: 26, mv: 1.5 },
+    IN15: { label: "IN Lv.15", density: 4.5, minGap: 120, grid: 8, pHold: 0.2, pDrag: 0.5, pFlick: 0.4, pChord: 0.4, side: 0.2, rot: 30, mv: 1.8 }
   };
   const WIN = {
     tap: { perfect: 80, good: 150, bad: 180 },
@@ -14,10 +14,11 @@
   };
   const HOLD_GAP = 180;
   const COLUMN = 0.24;
-  const LANES = [-0.25, 0, 0.25];
-  const FRAME_MS = 20;
+  const LANES = [-0.33, 0, 0.33];
+  const FRAME_MS = 10;
   const LEAD_IN = 1.2;
   const EFFECT_MS = 480;
+  const BASE_SPEED = 0.5;
   const STORE_KEY = "phigros-web-x-settings";
   const DEFAULTS = { track: "track", diff: "HD", flow: 1, offset: 0, sfx: true, rotation: true, autoplay: false };
   const COLORS = { tap: "#36d6ff", drag: "#ffe45e", flick: "#ff4d8d", gold: "#ffe07d", blue: "#48e5ff" };
@@ -31,70 +32,6 @@
       t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
-  }
-
-  function detectOnsets(mono, sr) {
-    const frameLen = Math.max(1, Math.round((sr * FRAME_MS) / 1000));
-    const n = Math.floor(mono.length / frameLen);
-    const logE = new Float64Array(n);
-    for (let f = 0; f < n; f++) {
-      let acc = 0;
-      const end = (f + 1) * frameLen;
-      for (let i = f * frameLen; i < end; i++) {
-        const d = i > 0 ? mono[i] - mono[i - 1] : mono[i];
-        acc += d * d;
-      }
-      logE[f] = Math.log(acc / frameLen + 1e-9);
-    }
-    const flux = new Float64Array(n);
-    for (let f = 1; f < n; f++) flux[f] = Math.max(0, logE[f] - logE[f - 1]);
-    const P = new Float64Array(n + 1);
-    for (let f = 0; f < n; f++) P[f + 1] = P[f] + flux[f];
-    const onsets = [];
-    let maxS = 0;
-    for (let f = 0; f < n; f++) {
-      const a = Math.max(0, f - 25);
-      const b = Math.min(n - 1, f + 25);
-      const mean = (P[b + 1] - P[a]) / (b - a + 1);
-      const v = flux[f];
-      if (v < 0.1 || v <= mean * 1.5 + 0.08) continue;
-      let peak = true;
-      for (let k = Math.max(0, f - 2); k <= Math.min(n - 1, f + 2); k++) {
-        if (k === f) continue;
-        if (flux[k] > v || (flux[k] === v && k < f)) {
-          peak = false;
-          break;
-        }
-      }
-      if (!peak) continue;
-      onsets.push({ t: f * FRAME_MS, s: v });
-      if (v > maxS) maxS = v;
-    }
-    if (maxS > 0) {
-      for (const o of onsets) o.s = o.s / maxS;
-    }
-    return { onsets: onsets, flux: flux };
-  }
-
-  function estimateTempo(onsets) {
-    const BINS = 64;
-    let best = { bpm: 120, phase: 0, score: -1 };
-    if (onsets.length < 4) return best;
-    for (let bpm = 80; bpm <= 200; bpm += 0.25) {
-      const period = 60000 / bpm;
-      const hist = new Float64Array(BINS);
-      for (const o of onsets) {
-        const frac = (((o.t % period) + period) % period) / period;
-        hist[Math.floor(frac * BINS) % BINS] += o.s;
-      }
-      for (let b = 0; b < BINS; b++) {
-        const score = hist[(b + BINS - 1) % BINS] + hist[b] + hist[(b + 1) % BINS];
-        if (score > best.score) {
-          best = { bpm: bpm, phase: ((b + 0.5) / BINS) * period, score: score };
-        }
-      }
-    }
-    return best;
   }
 
   function lowerBound(sorted, t) {
@@ -119,14 +56,112 @@
     sorted.splice(lowerBound(sorted, t), 0, t);
   }
 
+  function detectOnsets(mono, sr) {
+    const hop = Math.max(1, Math.round((sr * FRAME_MS) / 1000));
+    const n = Math.floor(mono.length / hop);
+    const aL = 1 - Math.exp((-2 * Math.PI * 200) / sr);
+    const aH = 1 - Math.exp((-2 * Math.PI * 3000) / sr);
+    const eLow = new Float64Array(n);
+    const eHigh = new Float64Array(n);
+    let lp1 = 0;
+    let lp2 = 0;
+    for (let f = 0; f < n; f++) {
+      let sumL = 0;
+      let sumH = 0;
+      const end = (f + 1) * hop;
+      for (let i = f * hop; i < end; i++) {
+        const x = mono[i];
+        lp1 += aL * (x - lp1);
+        lp2 += aH * (x - lp2);
+        const hi = x - lp2;
+        sumL += lp1 * lp1;
+        sumH += hi * hi;
+      }
+      eLow[f] = Math.log(sumL / hop + 1e-9);
+      eHigh[f] = Math.log(sumH / hop + 1e-9);
+    }
+    const fluxL = new Float64Array(n);
+    const fluxH = new Float64Array(n);
+    for (let f = 1; f < n; f++) {
+      fluxL[f] = Math.max(0, eLow[f] - eLow[f - 1]);
+      fluxH[f] = Math.max(0, eHigh[f] - eHigh[f - 1]);
+    }
+    const flux = new Float64Array(n);
+    for (let f = 0; f < n; f++) flux[f] = fluxL[f] + fluxH[f];
+    const P = new Float64Array(n + 1);
+    for (let f = 0; f < n; f++) P[f + 1] = P[f] + flux[f];
+    const peaks = [];
+    const win = Math.round(500 / FRAME_MS);
+    for (let f = 0; f < n; f++) {
+      const a = Math.max(0, f - win);
+      const b = Math.min(n - 1, f + win);
+      const mean = (P[b + 1] - P[a]) / (b - a + 1);
+      const v = flux[f];
+      if (v < 0.12 || v <= mean * 1.5 + 0.1) continue;
+      let peak = true;
+      for (let k = Math.max(0, f - 3); k <= Math.min(n - 1, f + 3); k++) {
+        if (k === f) continue;
+        if (flux[k] > v || (flux[k] === v && k < f)) {
+          peak = false;
+          break;
+        }
+      }
+      if (!peak) continue;
+      peaks.push({ t: f * FRAME_MS, lo: fluxL[f], hi: fluxH[f], s: v });
+    }
+    let maxL = 1e-9;
+    let maxH = 1e-9;
+    for (const p of peaks) {
+      if (p.lo > maxL) maxL = p.lo;
+      if (p.hi > maxH) maxH = p.hi;
+    }
+    for (const p of peaks) {
+      p.lo = p.lo / maxL;
+      p.hi = p.hi / maxH;
+      p.s = Math.max(p.lo, p.hi);
+    }
+    return { onsets: peaks };
+  }
+
+  function estimateTempo(onsets) {
+    const BINS = 64;
+    let best = { bpm: 120, phase: 0, score: -1 };
+    if (onsets.length < 4) return best;
+    for (let bpm = 80; bpm <= 200; bpm += 0.25) {
+      const period = 60000 / bpm;
+      const hist = new Float64Array(BINS);
+      for (const o of onsets) {
+        const frac = (((o.t % period) + period) % period) / period;
+        hist[Math.floor(frac * BINS) % BINS] += o.s;
+      }
+      for (let b = 0; b < BINS; b++) {
+        const score = hist[(b + BINS - 1) % BINS] + hist[b] + hist[(b + 1) % BINS];
+        if (score > best.score) {
+          best = { bpm: bpm, phase: ((b + 0.5) / BINS) * period, score: score };
+        }
+      }
+    }
+    return best;
+  }
+
+  function analyzeBuffer(buffer) {
+    const a = buffer.getChannelData(0);
+    const b = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : null;
+    const mono = new Float32Array(a.length);
+    for (let i = 0; i < a.length; i++) mono[i] = b ? (a[i] + b[i]) * 0.5 : a[i];
+    const res = detectOnsets(mono, buffer.sampleRate);
+    const tempo = estimateTempo(res.onsets);
+    return { onsets: res.onsets, bpm: tempo.bpm, phase: tempo.phase, durationMs: buffer.duration * 1000 };
+  }
+
   function makeNote(type, time, lane, side, dur, chord) {
     return {
       type: type,
-      time: time,
+      time: Math.round(time),
       lane: lane,
       side: side,
-      dur: dur,
-      endTime: time + dur,
+      dur: Math.round(dur),
+      endTime: Math.round(time + dur),
       chord: chord,
       state: "wait",
       headResult: null,
@@ -140,21 +175,79 @@
     });
   }
 
-  function generateChart(analysis, diffKey) {
+  function keyframeEvents(phase, stepMs, endMs, valueAt) {
+    const events = [];
+    const kA = Math.floor(-phase / stepMs) - 1;
+    const kB = Math.ceil((endMs - phase) / stepMs) + 1;
+    for (let k = kA; k < kB; k++) {
+      const t0 = phase + k * stepMs;
+      const t1 = t0 + stepMs;
+      events.push({ start: t0, end: t1, startV: valueAt(k), endV: valueAt(k + 1) });
+    }
+    return events;
+  }
+
+  function makeLines(an, cfg, durationMs) {
+    const beat = 60000 / an.bpm;
+    const endMs = durationMs + 30000;
+    const rotate = keyframeEvents(an.phase, beat / 2, endMs, function (k) {
+      const sign = Math.floor(k / 32) % 2 ? -1 : 1;
+      return cfg.rot * Math.sin((Math.PI * k) / 8) * sign;
+    });
+    const moveX = keyframeEvents(an.phase, beat * 2, endMs, function (j) {
+      return cfg.mv * Math.sin((Math.PI * j) / 4 + 0.9);
+    });
+    const moveY = keyframeEvents(an.phase, beat * 4, endMs, function (j) {
+      return cfg.mv * 0.6 * Math.cos((Math.PI * j) / 3);
+    });
+    return {
+      rotate: rotate,
+      moveX: moveX,
+      moveY: moveY,
+      speed: [{ start: -60000, end: endMs + 60000, value: BASE_SPEED }]
+    };
+  }
+
+  function generateChart(an, diffKey) {
     const cfg = DIFFS[diffKey] || DIFFS.HD;
     const rng = mulberry32(4242 + Object.keys(DIFFS).indexOf(diffKey) * 77);
-    const beatMs = 60000 / analysis.bpm;
-    const pool = analysis.onsets.filter(function (o) { return o.t >= 600; }).slice().sort(function (a, b) { return b.s - a.s; });
-    const sorted = [];
-    let picked = [];
-    for (const o of pool) {
-      if (!farEnough(sorted, o.t, cfg.gap)) continue;
-      insertSorted(sorted, o.t);
-      picked.push(o);
+    const beat = 60000 / an.bpm;
+    const step = beat / cfg.grid;
+    const durationMs = an.durationMs;
+    const cand = [];
+    for (const o of an.onsets) {
+      if (o.t < 600) continue;
+      const q = an.phase + Math.round((o.t - an.phase) / step) * step;
+      cand.push({ t: Math.round(q), s: o.s, lo: o.lo, hi: o.hi });
     }
-    picked.sort(function (a, b) { return b.s - a.s; });
-    picked = picked.slice(0, Math.max(1, Math.round(picked.length * cfg.keep)));
-    picked.sort(function (a, b) { return a.t - b.t; });
+    cand.sort(function (a, b) { return a.t - b.t || b.s - a.s; });
+    const merged = [];
+    for (const c of cand) {
+      const last = merged[merged.length - 1];
+      if (last && c.t === last.t) {
+        if (c.s > last.s) merged[merged.length - 1] = c;
+      } else {
+        merged.push(c);
+      }
+    }
+    const target = Math.max(1, Math.round((durationMs / 1000) * cfg.density));
+    const byStrength = merged.slice().sort(function (a, b) { return b.s - a.s; });
+    const sorted = [];
+    const accepted = [];
+    for (const c of byStrength) {
+      if (accepted.length >= target) break;
+      if (!farEnough(sorted, c.t, cfg.minGap)) continue;
+      insertSorted(sorted, c.t);
+      accepted.push(c);
+    }
+    accepted.forEach(function (c, idx) { c.strengthPct = idx / accepted.length; });
+    const loSorted = accepted.map(function (c) { return c.lo; }).sort(function (a, b) { return a - b; });
+    accepted.forEach(function (c) {
+      c.loPct = lowerBound(loSorted, c.lo) / loSorted.length;
+    });
+    accepted.sort(function (a, b) { return a.t - b.t; });
+    const notes = [];
+    let lastLane = -1;
     const pickLane = function (exclude) {
       let li;
       do {
@@ -162,38 +255,38 @@
       } while (li === exclude);
       return li;
     };
-    const notes = [];
-    let lastLane = -1;
-    for (let i = 0; i < picked.length; i++) {
-      const o = picked[i];
-      const prevGap = i > 0 ? o.t - picked[i - 1].t : 1e9;
-      const nextGap = i + 1 < picked.length ? picked[i + 1].t - o.t : 1e9;
+    for (let i = 0; i < accepted.length; i++) {
+      const c = accepted[i];
+      const p = c.strengthPct;
+      const prevGap = i > 0 ? c.t - accepted[i - 1].t : 1e9;
+      const nextGap = i + 1 < accepted.length ? accepted[i + 1].t - c.t : 1e9;
       let type = "tap";
       let dur = 0;
-      if (nextGap >= 650 && rng() < 0.6) {
+      if (nextGap >= beat * 1.0 && rng() < cfg.pHold) {
         type = "hold";
-        dur = Math.min(nextGap * 0.6, 1400);
-      } else if (prevGap < 170 && nextGap < 170 && o.s < 0.7) {
+        const span = Math.min(beat * 4, nextGap - beat * 0.5);
+        dur = Math.max(beat / 2, Math.floor(span / (beat / 4)) * (beat / 4));
+      } else if ((c.hi > c.lo || (prevGap <= beat * 0.5 && nextGap <= beat * 0.5)) && rng() < cfg.pDrag) {
         type = "drag";
-      } else if (o.s >= 0.8 && rng() < 0.6) {
+      } else if (c.loPct >= 0.8 && rng() < cfg.pFlick) {
         type = "flick";
       }
       const li = pickLane(lastLane);
       lastLane = li;
       const side = rng() < cfg.side ? -1 : 1;
-      const main = makeNote(type, o.t, LANES[li], side, dur, false);
+      const main = makeNote(type, c.t, LANES[li], side, dur, false);
       notes.push(main);
-      const rel = o.t - analysis.phase;
-      const beatIdx = Math.round(rel / beatMs);
-      const off = Math.abs(rel - beatIdx * beatMs);
-      if (type !== "hold" && off < 35 && beatIdx % 4 === 0 && o.s >= 0.55 && rng() < 0.7) {
+      const beatIdx = Math.round((c.t - an.phase) / beat);
+      const onBeat = Math.abs(c.t - an.phase - beatIdx * beat) < step * 0.25;
+      const strongBeat = beatIdx % 2 === 0 && p < 0.35;
+      if (type !== "hold" && onBeat && strongBeat && rng() < cfg.pChord) {
         const lj = pickLane(li);
         main.chord = true;
-        notes.push(makeNote("tap", o.t, LANES[lj], side, 0, true));
+        notes.push(makeNote("tap", c.t, LANES[lj], side, 0, true));
       }
     }
     notes.sort(function (a, b) { return a.time - b.time || a.lane - b.lane; });
-    return notes;
+    return { notes: notes, lines: makeLines(an, cfg, durationMs), durationMs: durationMs };
   }
 
   function judgeDelta(type, adt) {
@@ -235,14 +328,32 @@
     return "#ffffff";
   }
 
-  function analyzeBuffer(buffer) {
-    const a = buffer.getChannelData(0);
-    const b = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : null;
-    const mono = new Float32Array(a.length);
-    for (let i = 0; i < a.length; i++) mono[i] = b ? (a[i] + b[i]) * 0.5 : a[i];
-    const res = detectOnsets(mono, buffer.sampleRate);
-    const tempo = estimateTempo(res.onsets);
-    return { onsets: res.onsets, bpm: tempo.bpm, phase: tempo.phase, durationMs: buffer.duration * 1000 };
+  function evalTrack(list, ms, def) {
+    if (!list || list.length === 0) return def;
+    if (ms <= list[0].start) return list[0].startV;
+    const last = list[list.length - 1];
+    if (ms >= last.end) return last.endV;
+    let lo = 0;
+    let hi = list.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (list[mid].start <= ms) lo = mid;
+      else hi = mid - 1;
+    }
+    const e = list[lo];
+    if (ms >= e.end) return e.endV;
+    const k = (ms - e.start) / (e.end - e.start);
+    return e.startV + (e.endV - e.startV) * k;
+  }
+
+  function floorAt(events, ms, flow) {
+    let total = 0;
+    for (const e of events) {
+      if (ms <= e.start) break;
+      const t1 = Math.min(ms, e.end);
+      total += ((t1 - e.start) / 1000) * e.value;
+    }
+    return total * flow;
   }
 
   function makeHitBuffer(actx, kind) {
@@ -256,7 +367,7 @@
       if (kind === "tap") {
         d[i] = Math.sin(2 * Math.PI * 900 * t) * Math.exp(-45 * t) * 0.8;
       } else if (kind === "drag") {
-        d[i] = (2 / Math.PI) * Math.asin(Math.sin(2 * Math.PI * 620 * t)) * Math.exp(-30 * t) * 0.6;
+        d[i] = ((2 / Math.PI) * Math.asin(Math.sin(2 * Math.PI * 620 * t)) * Math.exp(-30 * t)) * 0.6;
       } else {
         const noise = Math.random() * 2 - 1;
         d[i] = (noise - prev) * 0.5 * Math.exp(-35 * t);
@@ -482,7 +593,7 @@
       }
       const key = id + "|" + diff;
       if (!charts[key]) charts[key] = generateChart(analyses[id].data, diff);
-      return { notes: charts[key], an: analyses[id].data };
+      return { notes: charts[key].notes, lines: charts[key].lines, an: analyses[id].data, durationMs: charts[key].durationMs };
     }
 
     function stopSource() {
@@ -502,17 +613,19 @@
 
     function geometry(g, ms) {
       const Lx = Math.min(W * 0.9, H * 1.3);
-      let cx = W / 2;
-      let cy = H * 0.6;
-      let ang = 0;
+      const X = Lx / 14;
+      let mx = 0;
+      let my = 0;
+      let deg = 0;
       if (settings.rotation) {
-        const beat = 60000 / g.an.bpm;
-        const ph = (2 * Math.PI * ms) / (beat * 4);
-        ang = 0.22 * Math.sin(ph);
-        cx += Math.sin(ph * 0.5) * W * 0.05;
-        cy += Math.cos(ph) * H * 0.02;
+        deg = evalTrack(g.lines.rotate, ms, 0);
+        mx = evalTrack(g.lines.moveX, ms, 0);
+        my = evalTrack(g.lines.moveY, ms, 0);
       }
-      return { cx: cx, cy: cy, ang: ang, Lx: Lx, cos: Math.cos(ang), sin: Math.sin(ang) };
+      const ang = (-deg * Math.PI) / 180;
+      const cx = W / 2 + mx * X;
+      const cy = H * 0.6 - my * 0.1 * H;
+      return { cx: cx, cy: cy, ang: ang, Lx: Lx, X: X, cos: Math.cos(ang), sin: Math.sin(ang) };
     }
 
     function localU(g, x, y) {
@@ -532,8 +645,8 @@
       return false;
     }
 
-    function pxPerMs(g) {
-      return settings.flow * H * 0.00045;
+    function floorOf(g, ms) {
+      return floorAt(g.lines.speed, ms, settings.flow);
     }
 
     function advanceLo(g) {
@@ -692,37 +805,42 @@
       endTick(g, ms);
     }
 
-    function drawBar(n, x0, w, v, kind) {
+    function drawBar(n, x0, w, v, kind, bh) {
       const color = kind === "drag" ? COLORS.drag : kind === "flick" ? COLORS.flick : COLORS.tap;
       ctx.fillStyle = color;
-      ctx.fillRect(x0, v - 5, w, 10);
       if (kind === "flick") {
         const mx = x0 + w / 2;
+        const r = bh * 0.9;
+        ctx.fillRect(x0, v - bh / 2, w, bh);
         ctx.fillStyle = "#ffffff";
         ctx.beginPath();
-        ctx.moveTo(mx, v - 6);
-        ctx.lineTo(mx + 8, v);
-        ctx.lineTo(mx, v + 6);
-        ctx.lineTo(mx - 8, v);
+        ctx.moveTo(mx, v - r);
+        ctx.lineTo(mx + r * 0.8, v);
+        ctx.lineTo(mx, v + r);
+        ctx.lineTo(mx - r * 0.8, v);
         ctx.closePath();
         ctx.fill();
-      } else if (kind === "tap") {
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(x0 + 6, v - 1.5, w - 12, 3);
+      } else {
+        ctx.fillRect(x0, v - bh / 2, w, bh);
+        if (kind === "tap") {
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(x0 + 6, v - 1.5, w - 12, 3);
+        }
       }
       if (n.chord) {
         ctx.strokeStyle = COLORS.gold;
         ctx.lineWidth = 2;
-        ctx.strokeRect(x0 - 3, v - 8, w + 6, 16);
+        ctx.strokeRect(x0 - 3, v - bh / 2 - 3, w + 6, bh + 6);
       }
     }
 
-    function drawNote(g, n, ms, ppm, geo) {
+    function drawNote(g, n, ms, geo, bh) {
       const x0 = (n.lane - COLUMN) * geo.Lx;
       const w = COLUMN * 2 * geo.Lx;
-      const vHead = -n.side * (n.time - ms) * ppm;
+      const fNow = floorOf(g, ms);
+      const vHead = -n.side * (floorOf(g, n.time) - fNow) * 0.6 * H;
       if (n.type === "hold") {
-        const vTail = -n.side * (n.endTime - ms) * ppm;
+        const vTail = -n.side * (floorOf(g, n.endTime) - fNow) * 0.6 * H;
         const a = n.state === "active" ? 0 : vHead;
         const top = Math.min(a, vTail);
         const bot = Math.max(a, vTail);
@@ -730,10 +848,10 @@
         ctx.fillStyle = COLORS.tap;
         ctx.fillRect(x0, top, w, Math.max(1, bot - top));
         ctx.globalAlpha = 1;
-        if (n.state === "wait") drawBar(n, x0, w, vHead, "tap");
+        if (n.state === "wait") drawBar(n, x0, w, vHead, "tap", bh);
         return;
       }
-      drawBar(n, x0, w, vHead, n.type);
+      drawBar(n, x0, w, vHead, n.type, bh);
     }
 
     function drawEffects(g, geo) {
@@ -769,7 +887,7 @@
       if (!g) return;
       const ms = g.ms;
       const geo = g.geo;
-      const ppm = pxPerMs(g);
+      const bh = Math.max(14, H * 0.022);
       const lc = lineColor(g.counts);
       ctx.save();
       ctx.translate(geo.cx, geo.cy);
@@ -779,12 +897,12 @@
       ctx.fillStyle = lc;
       ctx.fillRect(-geo.Lx / 2, -2, geo.Lx, 4);
       ctx.shadowBlur = 0;
-      const look = (H * 1.2) / ppm;
+      const look = 3000 / settings.flow;
       for (let i = g.lo; i < g.N; i++) {
         const n = g.notes[i];
         if (n.time - ms > look) break;
         if (n.state === "done") continue;
-        drawNote(g, n, ms, ppm, geo);
+        drawNote(g, n, ms, geo, bh);
       }
       drawEffects(g, geo);
       ctx.restore();
@@ -824,6 +942,7 @@
         id: id,
         diff: settings.diff,
         chartNotes: chart.notes,
+        lines: chart.lines,
         notes: notes,
         N: notes.length,
         an: chart.an,
@@ -889,7 +1008,7 @@
 
     function restartGame() {
       if (!game) return;
-      beginGame(game.id, { notes: game.chartNotes, an: game.an });
+      beginGame(game.id, { notes: game.chartNotes, lines: game.lines, an: game.an, durationMs: game.durationMs });
     }
 
     function quitGame() {
@@ -1032,6 +1151,9 @@
       estimateTempo: estimateTempo,
       analyzeBuffer: analyzeBuffer,
       generateChart: generateChart,
+      makeLines: makeLines,
+      evalTrack: evalTrack,
+      floorAt: floorAt,
       judgeDelta: judgeDelta,
       computeScore: computeScore,
       rankOf: rankOf,
