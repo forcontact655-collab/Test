@@ -552,6 +552,7 @@
       el("menu").classList.toggle("hidden", name !== "menu");
       el("pause").classList.toggle("hidden", name !== "pause");
       el("result").classList.toggle("hidden", name !== "result");
+      el("loading").classList.toggle("hidden", name !== "loading");
       document.body.classList.toggle("playing", name === "game" || name === "pause");
     }
 
@@ -919,14 +920,25 @@
       ctx.globalAlpha = 1;
     }
 
+    const bgImg = new Image();
+    let bgReady = false;
+    bgImg.onload = function () { bgReady = true; };
+    bgImg.src = "assets/bg.jpg";
+
     function draw(g) {
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
       ctx.clearRect(0, 0, W, H);
-      const grad = ctx.createLinearGradient(0, 0, 0, H);
-      grad.addColorStop(0, "#0c0b18");
-      grad.addColorStop(1, "#1a1430");
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, W, H);
+      if (bgReady) {
+        ctx.drawImage(bgImg, 0, 0, W, H);
+        ctx.fillStyle = "rgba(8,7,16,0.6)";
+        ctx.fillRect(0, 0, W, H);
+      } else {
+        const grad = ctx.createLinearGradient(0, 0, 0, H);
+        grad.addColorStop(0, "#0c0b18");
+        grad.addColorStop(1, "#1a1430");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H);
+      }
       if (!g) return;
       const ms = g.ms;
       const geo = g.geo;
@@ -1017,17 +1029,23 @@
     async function startFromMenu() {
       const btn = el("play-btn");
       btn.disabled = true;
-      setStatus("Загрузка трека…");
+      const id = settings.track;
+      el("load-track").textContent = trackNames[id] + " · " + DIFFS[settings.diff].label;
+      el("load-msg").textContent = "Загрузка трека…";
+      el("load-fill").style.width = "15%";
+      setScreen("loading");
       try {
         ensureAudio();
-        const id = settings.track;
         await loadTrack(id);
-        setStatus("Анализ трека и генерация чарта…");
+        el("load-fill").style.width = "60%";
+        el("load-msg").textContent = "Анализ трека и генерация чарта…";
         await new Promise(function (r) { setTimeout(r, 30); });
         const chart = getChart(id, settings.diff);
+        el("load-fill").style.width = "100%";
         setStatus("");
         beginGame(id, chart);
       } catch (err) {
+        setScreen("menu");
         setStatus("Ошибка: " + err.message);
       } finally {
         btn.disabled = false;

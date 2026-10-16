@@ -14,7 +14,7 @@ body.playing #hud{display:block}
 #score{position:absolute;right:14px;top:12px;font-variant-numeric:tabular-nums;font-size:24px;font-weight:700;color:#fff}
 #track-name{position:absolute;left:14px;bottom:12px;font-size:14px;color:#d8d8f0}
 #diff-name{position:absolute;right:14px;bottom:12px;font-size:14px;color:#ececff;font-weight:600}
-.screen{position:fixed;inset:0;display:flex;padding:16px;overflow-y:auto;background:radial-gradient(circle at 50% 30%,#241c44,#0c0b18 70%)}
+.screen{position:fixed;inset:0;display:flex;padding:16px;overflow-y:auto;background:linear-gradient(rgba(10,8,22,.55),rgba(10,8,22,.88)),url(assets/bg.jpg) center/cover no-repeat}
 #pause{background:rgba(8,7,16,.72)}
 .panel{margin:auto;width:100%;max-width:420px;background:rgba(255,255,255,.05);border:1px solid rgba(180,140,255,.25);border-radius:20px;padding:20px;backdrop-filter:blur(8px)}
 .panel.small{max-width:300px;text-align:center}
@@ -40,3 +40,6 @@ h2{margin:0 0 12px}
 #res-track{text-align:center}
 #res-rank{font-size:90px;font-weight:900;text-align:center;line-height:1.1;text-shadow:0 0 24px rgba(255,255,255,.3)}
 #res-score{text-align:center;font-size:30px;font-weight:800;font-variant-numeric:tabular-nums}
+
+.load-bar{margin-top:14px;height:6px;border-radius:3px;background:rgba(255,255,255,.12);overflow:hidden}
+#load-fill{height:100%;width:0;background:linear-gradient(90deg,#a98bff,#48e5ff);transition:width .35s ease}
