@@ -514,6 +514,15 @@
     const analyses = {};
     const charts = {};
     const trackNames = { track: "Somewhat_empty — Track", chrono: "Chronostasis — 160 BPM", custom: "" };
+    const covers = { track: "assets/cover-track.jpg", chrono: "assets/cover-chrono.jpg", custom: "assets/bg.jpg" };
+    const BEST_KEY = "phigros-web-x-best";
+    function loadBest() {
+      try {
+        return JSON.parse(localStorage.getItem(BEST_KEY)) || {};
+      } catch (e) {
+        return {};
+      }
+    }
     let game = null;
 
     function persist() {
@@ -538,7 +547,11 @@
       });
       const custom = el("custom-btn");
       custom.classList.toggle("on", settings.track === "custom");
-      custom.textContent = buffers.custom ? trackNames.custom : "Свой аудиофайл…";
+      el("custom-name").textContent = buffers.custom ? trackNames.custom : "Свой файл…";
+      el("menu-cover").src = covers[settings.track] || covers.custom;
+      el("menu-trackname").textContent = settings.track === "custom" ? (buffers.custom ? trackNames.custom : "Свой аудиофайл") : trackNames[settings.track];
+      const prevBest = loadBest()[settings.track + "|" + settings.diff];
+      el("menu-best").textContent = prevBest ? "Лучший результат  " + pad7(prevBest.score) + "  ·  " + prevBest.rank + "  ·  " + prevBest.acc.toFixed(2) + "%" : "Ещё не играли на этой сложности";
       el("flow").value = settings.flow;
       el("flow-val").textContent = settings.flow.toFixed(1) + "x";
       el("offset").value = settings.offset;
@@ -1110,6 +1123,18 @@
       el("res-early").textContent = String(g.early);
       el("res-late").textContent = String(g.late);
       el("res-track").textContent = trackNames[g.id] + " · " + DIFFS[g.diff].label;
+      el("res-cover").src = covers[g.id] || covers.custom;
+      const key = g.id + "|" + g.diff;
+      const best = loadBest();
+      const prev = best[key];
+      const isNew = !settings.autoplay && (!prev || score > prev.score);
+      if (isNew) {
+        best[key] = { score: score, acc: acc, rank: rank.label };
+        try {
+          localStorage.setItem(BEST_KEY, JSON.stringify(best));
+        } catch (e) {}
+      }
+      el("res-newbest").textContent = settings.autoplay ? "AutoPlay · рекорд не сохраняется" : isNew ? (prev ? "НОВЫЙ РЕКОРД  ·  прошлый " + pad7(prev.score) : "ПЕРВЫЙ РЕЗУЛЬТАТ") : "Лучший результат " + pad7(prev.score);
       setScreen("result");
     }
 
@@ -1188,6 +1213,12 @@
         setStatus("Не удалось открыть файл: " + err.message);
       }
       input.value = "";
+    });
+    el("settings-btn").addEventListener("click", function () {
+      el("menu").classList.add("settings-open");
+    });
+    el("settings-close").addEventListener("click", function () {
+      el("menu").classList.remove("settings-open");
     });
     el("flow").addEventListener("input", function (e) {
       settings.flow = parseFloat(e.target.value);
