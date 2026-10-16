@@ -466,6 +466,125 @@
     });
   }
 
+  const PEZ_TYPES = { 1: "tap", 2: "drag", 3: "hold", 4: "flick" };
+  const DIFF_TAGS = { EZ: ["6", "EZ"], HD: ["11", "HD"], IN14: ["14", "IN"], IN15: ["15", "IN"] };
+
+  function toBuffer(u8) {
+    return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+  }
+
+  function parsePezInfo(text) {
+    const info = {};
+    text.split(/\r?\n/).forEach(function (line) {
+      const i = line.indexOf(":");
+      if (i > 0) info[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+    });
+    return info;
+  }
+
+  function readZip(bytes) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let eocd = -1;
+    for (let i = bytes.byteLength - 22; i >= Math.max(0, bytes.byteLength - 65557); i--) {
+      if (view.getUint32(i, true) === 0x06054b50) {
+        eocd = i;
+        break;
+      }
+    }
+    if (eocd < 0) throw new Error("это не архив .pez");
+    const count = view.getUint16(eocd + 10, true);
+    let p = view.getUint32(eocd + 16, true);
+    const entries = {};
+    for (let k = 0; k < count; k++) {
+      if (view.getUint32(p, true) !== 0x02014b50) throw new Error("архив повреждён");
+      const method = view.getUint16(p + 10, true);
+      const csize = view.getUint32(p + 20, true);
+      const nlen = view.getUint16(p + 28, true);
+      const xlen = view.getUint16(p + 30, true);
+      const clen = view.getUint16(p + 32, true);
+      const loc = view.getUint32(p + 42, true);
+      const name = new TextDecoder("utf-8").decode(bytes.subarray(p + 46, p + 46 + nlen));
+      entries[name] = { method: method, csize: csize, loc: loc };
+      p += 46 + nlen + xlen + clen;
+    }
+    return { bytes: bytes, view: view, entries: entries };
+  }
+
+  async function unzipEntry(zip, name) {
+    const e = zip.entries[name];
+    if (!e) return null;
+    const start = e.loc + 30 + zip.view.getUint16(e.loc + 26, true) + zip.view.getUint16(e.loc + 28, true);
+    const data = zip.bytes.subarray(start, start + e.csize);
+    if (e.method === 0) return data;
+    if (e.method !== 8) throw new Error("неподдерживаемое сжатие в архиве");
+    if (typeof DecompressionStream === "undefined") throw new Error("браузер не умеет читать .pez, нужен Chrome 80+");
+    const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+
+  function pezLevel(text) {
+    const m = /(EZ|HD|IN|AT)\s*Lv\.?\s*(\d+)/i.exec(text || "");
+    if (!m) return { family: "", num: "?", key: "HD" };
+    const family = m[1].toUpperCase();
+    const num = parseInt(m[2], 10);
+    const key = family === "EZ" ? "EZ" : family === "HD" ? "HD" : num >= 15 ? "IN15" : "IN14";
+    return { family: family, num: String(num), key: key };
+  }
+
+  function rpeBeat(t) {
+    return t[0] + t[1] / (t[2] || 1);
+  }
+
+  function beatToMs(segs, beat) {
+    let ms = 0;
+    for (let i = 0; i < segs.length; i++) {
+      const from = segs[i].beat;
+      const to = i + 1 < segs.length ? segs[i + 1].beat : Infinity;
+      const span = Math.min(beat, to) - from;
+      if (span > 0) ms += span * 60000 / segs[i].bpm;
+      if (beat <= to) break;
+    }
+    return ms;
+  }
+
+  function buildPezChart(json, offsetMs, durationMs, diffKey) {
+    const cfg = DIFFS[diffKey] || DIFFS.HD;
+    const segs = (json.BPMList || []).map(function (b) {
+      return { beat: rpeBeat(b.startTime), bpm: b.bpm };
+    }).sort(function (a, b) { return a.beat - b.beat; });
+    if (!segs.length) segs.push({ beat: 0, bpm: 120 });
+    segs[0].beat = 0;
+    const an = { bpm: segs[0].bpm, phase: 0, durationMs: durationMs };
+    const seen = {};
+    const notes = [];
+    (json.judgeLineList || []).forEach(function (line) {
+      (line.notes || []).forEach(function (n) {
+        if (n.isFake) return;
+        let type = PEZ_TYPES[n.type];
+        if (!type) return;
+        const start = beatToMs(segs, rpeBeat(n.startTime)) + offsetMs;
+        const end = beatToMs(segs, rpeBeat(n.endTime)) + offsetMs;
+        const dur = type === "hold" ? end - start : 0;
+        if (type === "hold" && dur <= 0) type = "tap";
+        const time = Math.max(0, Math.round(start));
+        const u = n.positionX / 675;
+        const lane = u < -0.25 ? LANES[0] : u > 0.25 ? LANES[2] : LANES[1];
+        const key = time + "|" + lane + "|" + type;
+        if (seen[key]) return;
+        seen[key] = true;
+        notes.push(makeNote(type, time, lane, 1, type === "hold" ? dur : 0, false));
+      });
+    });
+    notes.sort(function (a, b) { return a.time - b.time || a.lane - b.lane; });
+    for (let i = 0; i < notes.length; i++) {
+      let j = i;
+      while (j + 1 < notes.length && notes[j + 1].time === notes[i].time) j++;
+      if (j > i) for (let k = i; k <= j; k++) notes[k].chord = true;
+      i = j;
+    }
+    return { notes: notes, lines: makeLines(an, cfg, durationMs), an: an, durationMs: durationMs };
+  }
+
   function loadSettings() {
     try {
       const raw = localStorage.getItem(STORE_KEY);
@@ -515,6 +634,10 @@
     const charts = {};
     const trackNames = { track: "Somewhat_empty — Track", chrono: "Chronostasis — 160 BPM", custom: "" };
     const covers = { track: "assets/cover-track.jpg", chrono: "assets/cover-chrono.jpg", custom: "assets/bg.jpg" };
+    let pezState = null;
+    function bestKey(track, diff) {
+      return (track === "custom" ? "custom:" + trackNames.custom : track) + "|" + diff;
+    }
     const BEST_KEY = "phigros-web-x-best";
     function loadBest() {
       try {
@@ -539,18 +662,24 @@
     }
 
     function syncMenu() {
+      const locked = !!pezState && settings.track === "custom";
+      if (locked) settings.diff = pezState.key;
       document.querySelectorAll(".track-btn").forEach(function (b) {
         b.classList.toggle("on", b.dataset.track === settings.track);
       });
       document.querySelectorAll(".diff-btn").forEach(function (b) {
         b.classList.toggle("on", b.dataset.diff === settings.diff);
+        b.disabled = locked && b.dataset.diff !== pezState.key;
+        const tag = locked && b.dataset.diff === pezState.key ? [pezState.num, pezState.family] : DIFF_TAGS[b.dataset.diff];
+        b.querySelector("b").textContent = tag[0];
+        b.querySelector("span").textContent = tag[1];
       });
       const custom = el("custom-btn");
       custom.classList.toggle("on", settings.track === "custom");
       el("custom-name").textContent = buffers.custom ? trackNames.custom : "Свой файл…";
       el("menu-cover").src = covers[settings.track] || covers.custom;
       el("menu-trackname").textContent = settings.track === "custom" ? (buffers.custom ? trackNames.custom : "Свой аудиофайл") : trackNames[settings.track];
-      const prevBest = loadBest()[settings.track + "|" + settings.diff];
+      const prevBest = loadBest()[bestKey(settings.track, settings.diff)];
       el("menu-best").textContent = prevBest ? "Лучший результат  " + pad7(prevBest.score) + "  ·  " + prevBest.rank + "  ·  " + prevBest.acc.toFixed(2) + "%" : "Ещё не играли на этой сложности";
       el("flow").value = settings.flow;
       el("flow-val").textContent = settings.flow.toFixed(1) + "x";
@@ -618,6 +747,7 @@
     }
 
     function getChart(id, diff) {
+      if (id === "custom" && pezState && diff === pezState.key) return pezState.chart;
       const buf = buffers[id];
       if (!analyses[id] || analyses[id].src !== buf) {
         analyses[id] = { src: buf, data: analyzeBuffer(buf) };
@@ -1124,7 +1254,7 @@
       el("res-late").textContent = String(g.late);
       el("res-track").textContent = trackNames[g.id] + " · " + DIFFS[g.diff].label;
       el("res-cover").src = covers[g.id] || covers.custom;
-      const key = g.id + "|" + g.diff;
+      const key = bestKey(g.id, g.diff);
       const best = loadBest();
       const prev = best[key];
       const isNew = !settings.autoplay && (!prev || score > prev.score);
@@ -1196,19 +1326,60 @@
     el("custom-btn").addEventListener("click", function () {
       el("file").click();
     });
+    function offsetOf(json, info) {
+      if (json.META && typeof json.META.offset === "number") return json.META.offset;
+      return Number(info.Offset) || 0;
+    }
+    async function importPez(f) {
+      const zip = readZip(new Uint8Array(await f.arrayBuffer()));
+      const infoBytes = await unzipEntry(zip, "info.txt");
+      if (!infoBytes) throw new Error("в .pez нет info.txt");
+      const info = parsePezInfo(new TextDecoder("utf-8").decode(infoBytes));
+      const chartBytes = info.Chart ? await unzipEntry(zip, info.Chart) : null;
+      const songBytes = info.Song ? await unzipEntry(zip, info.Song) : null;
+      if (!chartBytes || !songBytes) throw new Error("в .pez не хватает чарта или музыки");
+      const picBytes = info.Picture ? await unzipEntry(zip, info.Picture) : null;
+      const json = JSON.parse(new TextDecoder("utf-8").decode(chartBytes));
+      const picUrl = picBytes ? URL.createObjectURL(new Blob([picBytes], { type: /\.png$/i.test(info.Picture) ? "image/png" : "image/jpeg" })) : null;
+      return { info: info, json: json, song: songBytes, level: pezLevel(info.Level), picUrl: picUrl };
+    }
     el("file").addEventListener("change", async function (e) {
       const input = e.target;
       const f = input.files && input.files[0];
       if (!f) return;
       try {
         const a = ensureAudio();
-        setStatus("Декодирую " + f.name + "…");
-        buffers.custom = await decodeData(a.ctx, await f.arrayBuffer());
-        trackNames.custom = f.name;
-        settings.track = "custom";
-        persist();
-        syncMenu();
-        setStatus("Файл загружен: " + f.name);
+        setStatus("Открываю " + f.name + "…");
+        if (/\.pez$/i.test(f.name)) {
+          const pz = await importPez(f);
+          buffers.custom = await decodeData(a.ctx, toBuffer(pz.song));
+          const durationMs = buffers.custom.duration * 1000;
+          const offsetMs = offsetOf(pz.json, pz.info);
+          pezState = {
+            key: pz.level.key,
+            num: pz.level.num,
+            family: pz.level.family,
+            chart: buildPezChart(pz.json, offsetMs, durationMs, pz.level.key)
+          };
+          trackNames.custom = pz.info.Name || f.name;
+          if (covers.custom.indexOf("blob:") === 0) URL.revokeObjectURL(covers.custom);
+          covers.custom = pz.picUrl || "assets/bg.jpg";
+          settings.track = "custom";
+          settings.diff = pezState.key;
+          persist();
+          syncMenu();
+          setStatus("Файл загружен: " + trackNames.custom + " · " + pz.info.Level + ", сложность одна (из файла)");
+        } else {
+          buffers.custom = await decodeData(a.ctx, await f.arrayBuffer());
+          trackNames.custom = f.name;
+          pezState = null;
+          if (covers.custom.indexOf("blob:") === 0) URL.revokeObjectURL(covers.custom);
+          covers.custom = "assets/bg.jpg";
+          settings.track = "custom";
+          persist();
+          syncMenu();
+          setStatus("Файл загружен: " + f.name);
+        }
       } catch (err) {
         setStatus("Не удалось открыть файл: " + err.message);
       }
