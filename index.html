@@ -3,47 +3,59 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-  <meta name="theme-color" content="#2b1d08">
-  <title>Медовый рой</title>
+  <meta name="theme-color" content="#120d1c">
+  <title>Самоцветная шахта</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="app">
-    <canvas id="scene"></canvas>
-
     <header id="top">
-      <div class="honey-box">
-        <span id="honey">0</span>
+      <div class="gem-box">
+        <span id="gems">0</span>
         <small id="rate">+0/с</small>
-        <small id="click-info">Тап +1</small>
       </div>
-      <div id="buff" class="buff hidden"></div>
-      <div class="pills">
-        <button id="royal-btn" class="pill" type="button" disabled>Новый рой</button>
-        <button id="sound-btn" class="pill" type="button">Звук: вкл</button>
+      <div class="meta">
+        <span id="crys">Кристаллы: 0</span>
+        <span id="ach-count">Достижения: 0/8</span>
       </div>
-    </header>
-
-    <aside id="shop">
-      <div class="shop-head">
-        <div>
-          <b>Улей</b>
-          <small id="stats">Пчёл 1</small>
-        </div>
+      <div class="actions">
         <div class="modes">
           <button class="mode on" type="button" data-mode="1">x1</button>
           <button class="mode" type="button" data-mode="10">x10</button>
           <button class="mode" type="button" data-mode="100">x100</button>
           <button class="mode" type="button" data-mode="0">MAX</button>
         </div>
+        <button id="maxall" class="pill" type="button">Купить всё</button>
+        <button id="ach-btn" class="pill" type="button">Достижения</button>
+        <button id="sound-btn" class="pill" type="button">Звук: вкл</button>
       </div>
-      <div id="scroll">
-        <div class="sec-title" id="ups-title">Улучшения</div>
-        <div id="ups"></div>
-        <div class="sec-title">Производство</div>
-        <div id="items"></div>
-      </div>
-    </aside>
+    </header>
+
+    <div class="wrap">
+      <section id="tiers"></section>
+      <section id="layers">
+        <div class="layer" id="tempo-box">
+          <div class="l-top"><b>Темп</b><span id="tempo-info"></span></div>
+          <div class="l-desc">Ускоряет всё производство. Сбрасывается Стволом и Обвалом.</div>
+          <button id="tempo-btn" class="btn" type="button"></button>
+        </div>
+        <div class="layer" id="boost-box">
+          <div class="l-top"><b>Проходка</b><span id="boost-info"></span></div>
+          <div class="l-desc" id="boost-note"></div>
+          <button id="boost-btn" class="btn" type="button"></button>
+        </div>
+        <div class="layer" id="shaft-box">
+          <div class="l-top"><b>Ствол</b><span id="shaft-info"></span></div>
+          <div class="l-desc" id="shaft-note"></div>
+          <button id="shaft-btn" class="btn" type="button"></button>
+        </div>
+        <div class="layer" id="collapse-box">
+          <div class="l-top"><b>Обвал</b><span id="collapse-info"></span></div>
+          <div class="l-desc" id="collapse-note"></div>
+          <button id="collapse-btn" class="btn" type="button"></button>
+        </div>
+      </section>
+    </div>
 
     <div id="toasts"></div>
 
