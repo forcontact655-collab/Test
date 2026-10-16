@@ -1,10 +1,10 @@
 "use strict";
 (function () {
   const DIFFS = {
-    EZ: { label: "EZ Lv.6", density: 1.0, minGap: 500, grid: 4, pHold: 0.4, pDrag: 0.15, pFlick: 0.2, pChord: 0, side: 0, rot: 14, mv: 0.8 },
-    HD: { label: "HD Lv.11", density: 1.8, minGap: 300, grid: 4, pHold: 0.35, pDrag: 0.3, pFlick: 0.35, pChord: 0.15, side: 0, rot: 20, mv: 1.1 },
-    IN14: { label: "IN Lv.14", density: 3.0, minGap: 180, grid: 8, pHold: 0.25, pDrag: 0.45, pFlick: 0.4, pChord: 0.3, side: 0.12, rot: 26, mv: 1.5 },
-    IN15: { label: "IN Lv.15", density: 4.5, minGap: 120, grid: 8, pHold: 0.2, pDrag: 0.5, pFlick: 0.4, pChord: 0.4, side: 0.2, rot: 30, mv: 1.8 }
+    EZ: { label: "EZ Lv.6", density: 0.9, minGap: 600, grid: 4, pHold: 0.4, pDrag: 0.15, pFlick: 0.2, pChord: 0, side: 0, rot: 0, mv: 0 },
+    HD: { label: "HD Lv.11", density: 1.4, minGap: 380, grid: 4, pHold: 0.35, pDrag: 0.3, pFlick: 0.35, pChord: 0.1, side: 0, rot: 6, mv: 0.4 },
+    IN14: { label: "IN Lv.14", density: 2.4, minGap: 260, grid: 8, pHold: 0.25, pDrag: 0.45, pFlick: 0.4, pChord: 0.2, side: 0.12, rot: 10, mv: 0.6 },
+    IN15: { label: "IN Lv.15", density: 3.3, minGap: 200, grid: 8, pHold: 0.2, pDrag: 0.5, pFlick: 0.4, pChord: 0.3, side: 0.2, rot: 14, mv: 0.8 }
   };
   const WIN = {
     tap: { perfect: 80, good: 150, bad: 180 },
@@ -14,6 +14,7 @@
   };
   const HOLD_GAP = 180;
   const COLUMN = 0.24;
+  const LINE_Y = 0.8;
   const LANES = [-0.33, 0, 0.33];
   const FRAME_MS = 10;
   const LEAD_IN = 1.2;
@@ -175,35 +176,53 @@
     });
   }
 
-  function keyframeEvents(phase, stepMs, endMs, valueAt) {
+  function stepEvents(phase, stepMs, endMs, rampMs, valueAt) {
     const events = [];
     const kA = Math.floor(-phase / stepMs) - 1;
     const kB = Math.ceil((endMs - phase) / stepMs) + 1;
+    const hold = stepMs - rampMs;
     for (let k = kA; k < kB; k++) {
       const t0 = phase + k * stepMs;
-      const t1 = t0 + stepMs;
-      events.push({ start: t0, end: t1, startV: valueAt(k), endV: valueAt(k + 1) });
+      const v0 = valueAt(k);
+      events.push({ start: t0, end: t0 + hold, startV: v0, endV: v0 });
+      events.push({ start: t0 + hold, end: t0 + stepMs, startV: v0, endV: valueAt(k + 1) });
     }
     return events;
+  }
+
+  function targetPattern(amp, seed) {
+    const len = 64;
+    const out = [];
+    if (amp <= 0) {
+      for (let i = 0; i < len; i++) out.push(0);
+      return out;
+    }
+    const rng = mulberry32(seed);
+    for (let i = 0; i < len; i++) {
+      const r = rng();
+      out.push(r < 0.5 ? 0 : r < 0.75 ? -amp : amp);
+    }
+    return out;
   }
 
   function makeLines(an, cfg, durationMs) {
     const beat = 60000 / an.bpm;
     const endMs = durationMs + 30000;
-    const rotate = keyframeEvents(an.phase, beat / 2, endMs, function (k) {
-      const sign = Math.floor(k / 32) % 2 ? -1 : 1;
-      return cfg.rot * Math.sin((Math.PI * k) / 8) * sign;
-    });
-    const moveX = keyframeEvents(an.phase, beat * 2, endMs, function (j) {
-      return cfg.mv * Math.sin((Math.PI * j) / 4 + 0.9);
-    });
-    const moveY = keyframeEvents(an.phase, beat * 4, endMs, function (j) {
-      return cfg.mv * 0.6 * Math.cos((Math.PI * j) / 3);
-    });
+    const stepMs = beat * 8;
+    const rampMs = beat * 4;
+    const rotPat = targetPattern(cfg.rot, 1001);
+    const movePat = targetPattern(cfg.mv, 2002);
+    const at = function (pat, k) {
+      const n = pat.length;
+      return pat[((k % n) + n) % n];
+    };
     return {
-      rotate: rotate,
-      moveX: moveX,
-      moveY: moveY,
+      rotate: stepEvents(an.phase, stepMs, endMs, rampMs, function (k) {
+        return at(rotPat, k);
+      }),
+      moveX: stepEvents(an.phase, stepMs, endMs, rampMs, function (k) {
+        return at(movePat, k);
+      }),
       speed: [{ start: -60000, end: endMs + 60000, value: BASE_SPEED }]
     };
   }
@@ -615,16 +634,14 @@
       const Lx = Math.min(W * 0.9, H * 1.3);
       const X = Lx / 14;
       let mx = 0;
-      let my = 0;
       let deg = 0;
       if (settings.rotation) {
         deg = evalTrack(g.lines.rotate, ms, 0);
         mx = evalTrack(g.lines.moveX, ms, 0);
-        my = evalTrack(g.lines.moveY, ms, 0);
       }
       const ang = (-deg * Math.PI) / 180;
       const cx = W / 2 + mx * X;
-      const cy = H * 0.6 - my * 0.1 * H;
+      const cy = H * LINE_Y;
       return { cx: cx, cy: cy, ang: ang, Lx: Lx, X: X, cos: Math.cos(ang), sin: Math.sin(ang) };
     }
 
