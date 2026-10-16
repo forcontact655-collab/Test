@@ -1,10 +1,10 @@
 "use strict";
 (function () {
   const DIFFS = {
-    EZ: { label: "EZ Lv.6", density: 0.9, minGap: 600, grid: 4, pHold: 0.4, pDrag: 0.15, pFlick: 0.2, pChord: 0, side: 0, rot: 0, mv: 0 },
-    HD: { label: "HD Lv.11", density: 1.4, minGap: 380, grid: 4, pHold: 0.35, pDrag: 0.3, pFlick: 0.35, pChord: 0.1, side: 0, rot: 6, mv: 0.4 },
-    IN14: { label: "IN Lv.14", density: 2.4, minGap: 260, grid: 8, pHold: 0.25, pDrag: 0.45, pFlick: 0.4, pChord: 0.2, side: 0.12, rot: 10, mv: 0.6 },
-    IN15: { label: "IN Lv.15", density: 3.3, minGap: 200, grid: 8, pHold: 0.2, pDrag: 0.5, pFlick: 0.4, pChord: 0.3, side: 0.2, rot: 14, mv: 0.8 }
+    EZ: { label: "EZ Lv.6", density: 0.9, minGap: 600, grid: 4, pHold: 0.4, pDrag: 0.15, pFlick: 0.2, pChord: 0, rot: 0, mv: 0 },
+    HD: { label: "HD Lv.11", density: 1.4, minGap: 380, grid: 4, pHold: 0.35, pDrag: 0.3, pFlick: 0.35, pChord: 0.1, rot: 6, mv: 0.4 },
+    IN14: { label: "IN Lv.14", density: 2.4, minGap: 260, grid: 8, pHold: 0.25, pDrag: 0.45, pFlick: 0.4, pChord: 0.2, rot: 10, mv: 0.6 },
+    IN15: { label: "IN Lv.15", density: 3.3, minGap: 200, grid: 8, pHold: 0.2, pDrag: 0.5, pFlick: 0.4, pChord: 0.3, rot: 14, mv: 0.8 }
   };
   const WIN = {
     tap: { perfect: 80, good: 150, bad: 180 },
@@ -293,7 +293,7 @@
       }
       const li = pickLane(lastLane);
       lastLane = li;
-      const side = rng() < cfg.side ? -1 : 1;
+      const side = 1;
       const main = makeNote(type, c.t, LANES[li], side, dur, false);
       notes.push(main);
       const beatIdx = Math.round((c.t - an.phase) / beat);
