@@ -14,7 +14,7 @@
   };
   const HOLD_GAP = 180;
   const COLUMN = 0.24;
-  const NOTE_HALF = 0.06;
+  const NOTE_HALF = 0.065;
   const LINE_Y = 0.8;
   const LANES = [-0.33, 0, 0.33];
   const FRAME_MS = 10;
@@ -632,7 +632,7 @@
     }
 
     function geometry(g, ms) {
-      const Lx = Math.min(W * 0.9, H * 1.3);
+      const Lx = Math.min(W * 0.9, H * 1.8);
       const X = Lx / 14;
       let mx = 0;
       let deg = 0;
@@ -930,7 +930,7 @@
       if (!g) return;
       const ms = g.ms;
       const geo = g.geo;
-      const bh = Math.max(14, H * 0.022);
+      const bh = Math.max(15, H * 0.026);
       const lc = lineColor(g.counts);
       ctx.save();
       ctx.translate(geo.cx, geo.cy);
@@ -938,7 +938,7 @@
       ctx.shadowColor = lc;
       ctx.shadowBlur = 12 * DPR;
       ctx.fillStyle = lc;
-      ctx.fillRect(-geo.Lx / 2, -2, geo.Lx, 4);
+      ctx.fillRect(-geo.Lx / 2, -3, geo.Lx, 6);
       ctx.shadowBlur = 0;
       const look = 3000 / settings.flow;
       for (let i = g.lo; i < g.N; i++) {
