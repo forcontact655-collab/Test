@@ -3,62 +3,51 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-  <meta name="theme-color" content="#0b0620">
-  <title>Pulse Flip</title>
+  <meta name="theme-color" content="#2b1d08">
+  <title>Медовый рой</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="app">
-    <canvas id="game"></canvas>
+    <canvas id="scene"></canvas>
 
-    <div id="hud">
-      <div class="score">
-        <span id="score">0</span>
-        <span id="mult">x1</span>
-        <div class="status">
-          <span id="shield-ind" class="chip">ЩИТ</span>
-          <span id="magnet-ind" class="chip">МАГНИТ</span>
+    <header id="top">
+      <div class="honey-box">
+        <span id="honey">0</span>
+        <small id="rate">+0/с</small>
+      </div>
+      <div class="pills">
+        <button id="royal-btn" class="pill" type="button" disabled>Новый рой</button>
+        <button id="sound-btn" class="pill" type="button">Звук: вкл</button>
+      </div>
+    </header>
+
+    <aside id="shop">
+      <div class="shop-head">
+        <div>
+          <b>Улей</b>
+          <small id="stats">Пчёл 1 · Цветов 3</small>
+        </div>
+        <div class="modes">
+          <button class="mode on" type="button" data-mode="1">x1</button>
+          <button class="mode" type="button" data-mode="10">x10</button>
+          <button class="mode" type="button" data-mode="100">x100</button>
         </div>
       </div>
-      <button id="pause-btn" class="icon-btn" type="button" aria-label="Пауза">II</button>
-    </div>
+      <div id="items"></div>
+    </aside>
 
-    <section id="menu" class="screen show">
-      <div class="title">
-        <div class="orb"></div>
-        <h1>PULSE FLIP</h1>
-        <p>Тапни, чтобы перевернуть гравитацию</p>
+    <div id="toasts"></div>
+
+    <div id="modal" class="modal">
+      <div class="card">
+        <h2 id="modal-title"></h2>
+        <p id="modal-text"></p>
+        <div class="modal-actions">
+          <button id="modal-cancel" class="btn" type="button">Отмена</button>
+          <button id="modal-ok" class="btn primary" type="button">Ок</button>
+        </div>
       </div>
-      <button id="play-btn" class="btn primary" type="button">Играть</button>
-      <button id="sound-btn" class="btn" type="button">Звук: вкл</button>
-      <p id="menu-best" class="best"></p>
-      <p class="rules">Собирай кристаллы · Уходи от шипов · Лови щит и магнит</p>
-    </section>
-
-    <section id="pause" class="screen">
-      <h2>Пауза</h2>
-      <button id="resume-btn" class="btn primary" type="button">Продолжить</button>
-      <button id="pause-menu-btn" class="btn" type="button">В меню</button>
-    </section>
-
-    <section id="over" class="screen">
-      <h2>Конец полёта</h2>
-      <div class="over-score">
-        <b id="over-score">0</b>
-        <span id="over-note"></span>
-      </div>
-      <div class="stats">
-        <div><span>Кристаллы</span><b id="over-gems">0</b></div>
-        <div><span>Макс. комбо</span><b id="over-combo">x0</b></div>
-        <div><span>Близко</span><b id="over-near">0</b></div>
-      </div>
-      <button id="retry-btn" class="btn primary" type="button">Ещё раз</button>
-      <button id="over-menu-btn" class="btn" type="button">В меню</button>
-    </section>
-
-    <div id="rotate">
-      <div class="phone"></div>
-      <p>Поверни телефон горизонтально</p>
     </div>
   </div>
   <script src="game.js"></script>

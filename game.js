@@ -1,26 +1,43 @@
 "use strict";
 (function () {
   const LH = 540;
-  const FLOOR = 470;
-  const CEIL = 70;
-  const R = 15;
-  const GRAV = 4600;
-  const SPIKE_S = 34;
-  const SPIKE_H = 44;
-  const BPM = 116;
-  const BEST_KEY = "pulse-flip-best";
-  const SOUND_KEY = "pulse-flip-sound";
-  const CHORDS = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];
-  const COLORS = { cyan: "#3ff3ff", pink: "#ff3ecf", gold: "#ffd34e", blue: "#4d8dff", violet: "#9b6bff", white: "#ffffff" };
+  const SAVE_KEY = "honey-swarm-v1";
+  const OFFLINE_MAX = 8 * 3600;
+  const OFFLINE_RATE = 0.5;
+  const ROYAL_NEED = 1e6;
+  const ENDING_ROYAL = 10;
+  const MAX_FLOWERS_SHOWN = 24;
+  const MAX_BEES_SHOWN = 60;
+  const SUF = ["", "k", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc"];
+  const UPG = [
+    { id: "bee", name: "Рабочие пчёлы", base: 10, grow: 1.15, max: 5000, desc: "Каждая пчела постоянно носит мёд в улей" },
+    { id: "flower", name: "Цветы", base: 60, grow: 1.5, max: 60, desc: "Больше цветов: каждая пчела собирает больше" },
+    { id: "comb", name: "Соты", base: 120, grow: 1.4, max: 200, desc: "+1 мёд за каждый тап по улью" },
+    { id: "jelly", name: "Маточное молочко", base: 800, grow: 2.2, max: 60, desc: "×1,25 ко всему сбору за уровень" },
+    { id: "auto", name: "Автосбор", base: 3000, grow: 2.6, max: 200, desc: "Соты собираются сами: тап в секунду за уровень" },
+    { id: "nursery", name: "Нянька", base: 15000, grow: 2.8, max: 100, desc: "Каждые 20 с рождается пчела за уровень" }
+  ];
+  const MILES = [
+    [1e3, "Первые соты"],
+    [1e4, "Пасека растёт"],
+    [1e5, "Полный улей"],
+    [1e6, "Королевский рой"],
+    [1e8, "Медовая река"],
+    [1e10, "Легенда полей"]
+  ];
+  const PALETTE = ["#ff7ab6", "#b98cff", "#ffd34e", "#ff9f5a", "#7fd3ff", "#ffffff"];
 
-  const canvas = document.getElementById("game");
-  const ctx = canvas.getContext("2d");
   const $ = function (id) { return document.getElementById(id); };
-
+  const canvas = $("scene");
+  const ctx = canvas.getContext("2d");
   const bgImg = new Image();
   let bgReady = false;
-  bgImg.onload = function () { bgReady = true; };
-  bgImg.src = "assets/city-bg.jpg";
+  let bgCanvas = null;
+  bgImg.onload = function () {
+    bgReady = true;
+    buildBg();
+  };
+  bgImg.src = "assets/meadow.jpg";
 
   let W = 1;
   let H = 1;
@@ -36,800 +53,674 @@
     canvas.height = Math.round(H * dpr);
     S = H / LH;
     LW = W / S;
+    buildBg();
   }
 
-  function glowSprite(color) {
-    const size = 128;
-    const c = document.createElement("canvas");
-    c.width = size;
-    c.height = size;
-    const g = c.getContext("2d");
-    const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
-    grd.addColorStop(0, "rgba(255,255,255,0.95)");
-    grd.addColorStop(0.22, color);
-    grd.addColorStop(0.6, "rgba(0,0,0,0)");
-    grd.addColorStop(1, "rgba(0,0,0,0)");
-    g.fillStyle = grd;
-    g.fillRect(0, 0, size, size);
-    return c;
-  }
-  const GLOW = {};
-  Object.keys(COLORS).forEach(function (k) { GLOW[k] = glowSprite(COLORS[k]); });
-
-  function rand(a, b) { return a + Math.random() * (b - a); }
-  function pick(list) { return list[Math.floor(Math.random() * list.length)]; }
-  function readNum(key) {
-    try { return Number(localStorage.getItem(key)) || 0; } catch (e) { return 0; }
-  }
-  function writeVal(key, val) {
-    try { localStorage.setItem(key, val); } catch (e) { return; }
+  function buildBg() {
+    if (!bgReady || W <= 1) return;
+    bgCanvas = document.createElement("canvas");
+    bgCanvas.width = Math.round(W * dpr);
+    bgCanvas.height = Math.round(H * dpr);
+    const c = bgCanvas.getContext("2d");
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.fillStyle = "#2b1d08";
+    c.fillRect(0, 0, W, H);
+    const sc = Math.max(W / bgImg.width, H / bgImg.height);
+    const dw = bgImg.width * sc;
+    const dh = bgImg.height * sc;
+    c.drawImage(bgImg, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    const g = c.createLinearGradient(0, H * 0.5, 0, H);
+    g.addColorStop(0, "rgba(43,29,8,0)");
+    g.addColorStop(1, "rgba(43,29,8,0.55)");
+    c.fillStyle = g;
+    c.fillRect(0, 0, W, H);
   }
 
-  let sound = true;
-  try { sound = localStorage.getItem(SOUND_KEY) !== "off"; } catch (e) { sound = true; }
-  let actx = null;
-  let master = null;
-  let noiseBuf = null;
-  let musicTimer = null;
-  let nextStep = 0;
-  let stepIdx = 0;
-
-  function audioReady() {
-    if (!actx) {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return false;
-      actx = new AC();
-      master = actx.createGain();
-      master.gain.value = sound ? 0.7 : 0;
-      master.connect(actx.destination);
-      noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
-      const d = noiseBuf.getChannelData(0);
-      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-    }
-    if (actx.state === "suspended") actx.resume();
-    return true;
-  }
-
-  function tone(type, freq, t0, dur, vol, toFreq) {
-    const o = actx.createOscillator();
-    const g = actx.createGain();
-    o.type = type;
-    o.frequency.setValueAtTime(freq, t0);
-    if (toFreq) o.frequency.exponentialRampToValueAtTime(toFreq, t0 + dur);
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(vol, t0 + 0.012);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    o.connect(g);
-    g.connect(master);
-    o.start(t0);
-    o.stop(t0 + dur + 0.05);
-  }
-
-  function noise(t0, dur, vol, freq, filterType) {
-    const src = actx.createBufferSource();
-    src.buffer = noiseBuf;
-    const f = actx.createBiquadFilter();
-    f.type = filterType;
-    f.frequency.value = freq;
-    const g = actx.createGain();
-    g.gain.setValueAtTime(vol, t0);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    src.connect(f);
-    f.connect(g);
-    g.connect(master);
-    src.start(t0, Math.random() * 0.5);
-    src.stop(t0 + dur + 0.05);
-  }
-
-  function sfx(name) {
-    if (!sound || !audioReady()) return;
-    const t = actx.currentTime;
-    if (name === "flip") {
-      noise(t, 0.14, 0.18, 1400, "bandpass");
-      tone("sine", 300, t, 0.16, 0.18, 760);
-    } else if (name === "coin") {
-      tone("triangle", 1046, t, 0.12, 0.2);
-      tone("sine", 1568, t + 0.04, 0.14, 0.12);
-    } else if (name === "near") {
-      tone("square", 1760, t, 0.07, 0.04);
-    } else if (name === "hit") {
-      noise(t, 0.4, 0.45, 500, "lowpass");
-      tone("sawtooth", 220, t, 0.45, 0.25, 35);
-    } else if (name === "shield") {
-      noise(t, 0.3, 0.3, 3500, "highpass");
-      tone("sine", 620, t, 0.3, 0.2, 1500);
-    } else if (name === "power") {
-      tone("triangle", 523, t, 0.25, 0.22, 1046);
-      tone("triangle", 784, t + 0.1, 0.3, 0.2, 1568);
-    } else if (name === "over") {
-      tone("sawtooth", 180, t, 0.9, 0.2, 40);
-    } else if (name === "start") {
-      tone("triangle", 440, t, 0.15, 0.2, 880);
-    }
-  }
-
-  function mtof(m) { return 440 * Math.pow(2, (m - 69) / 12); }
-
-  function scheduleStep(step, t) {
-    const s = step % 16;
-    const chord = CHORDS[Math.floor(step / 16) % CHORDS.length];
-    if (s % 2 === 0) tone("triangle", mtof(chord[0] - 24), t, 0.2, 0.2);
-    if (s % 4 === 0) tone("sine", 120, t, 0.2, 0.42, 42);
-    if (s % 2 === 1) noise(t, 0.05, 0.05, 8000, "highpass");
-    tone("triangle", mtof(chord[s % 3] + 12), t, 0.2, 0.05);
-  }
-
-  function musicStart() {
-    if (!audioReady() || musicTimer) return;
-    nextStep = actx.currentTime + 0.1;
-    musicTimer = setInterval(function () {
-      const stepDur = 60 / BPM / 4;
-      while (nextStep < actx.currentTime + 0.15) {
-        if (sound) scheduleStep(stepIdx, nextStep);
-        nextStep += stepDur;
-        stepIdx++;
-      }
-    }, 30);
-  }
-
-  function musicStop() {
-    if (musicTimer) {
-      clearInterval(musicTimer);
-      musicTimer = null;
-    }
-  }
-
-  function toggleSound() {
-    sound = !sound;
-    writeVal(SOUND_KEY, sound ? "on" : "off");
-    if (master) master.gain.value = sound ? 0.7 : 0;
-    refreshSoundLabel();
-  }
-
-  function refreshSoundLabel() {
-    $("sound-btn").textContent = sound ? "Звук: вкл" : "Звук: выкл";
-  }
-
-  let st = "menu";
-  let best = readNum(BEST_KEY);
-  let w = null;
-  const stars = [];
-  for (let i = 0; i < 70; i++) {
-    stars.push({ x: Math.random(), y: Math.random(), v: rand(0.3, 1), r: rand(0.8, 2), p: rand(0, 6) });
-  }
-
-  function PX() { return LW * 0.22; }
-  function surfaceY(side) { return side > 0 ? FLOOR - 40 : CEIL + 40; }
-
-  function newWorld() {
+  function fresh() {
     return {
-      t: 0,
-      speed: 360,
-      score: 0,
-      gems: 0,
-      combo: 0,
-      maxCombo: 0,
-      mult: 1,
-      near: 0,
-      shield: false,
-      magnet: 0,
-      shake: 0,
-      flash: 0,
-      dying: false,
-      deadT: 0,
-      bgX: 0,
-      p: { y: FLOOR - R, vy: 0, dir: 1, squash: 0, ring: 0, trail: 0 },
-      obs: [],
-      pick: [],
-      parts: [],
-      texts: [],
-      spawnX: LW + 200
+      honey: 0,
+      total: 0,
+      lv: { bee: 0, flower: 0, comb: 0, jelly: 0, auto: 0, nursery: 0 },
+      extra: 0,
+      nurse: 0,
+      royal: 0,
+      ach: [],
+      ending: false,
+      lastSeen: Date.now(),
+      mode: 1,
+      muted: false
     };
   }
 
-  function burst(x, y, g, n, speed) {
-    for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const v = speed * rand(0.3, 1);
-      w.parts.push({ kind: "spark", x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0, max: rand(0.35, 0.8), size: rand(6, 14), g: g });
-    }
-    if (n > 8) w.parts.push({ kind: "ring", x: x, y: y, life: 0, max: 0.45, r: R, g: g });
-    if (w.parts.length > 360) w.parts.splice(0, w.parts.length - 360);
-  }
-
-  function text(str, x, y, g) {
-    w.texts.push({ str: str, x: x, y: y, life: 0, max: 0.9, g: g });
-  }
-
-  function addSpike(x, side, n) {
-    w.obs.push({ x: x, side: side, n: n, w: n * SPIKE_S, near: false, dead: false });
-  }
-
-  function addPick(x, y, kind) {
-    w.pick.push({ x: x, y: y, kind: kind, taken: false, spin: rand(0, 6) });
-  }
-
-  function spawnAhead() {
-    while (w.spawnX < LW + 300) {
-      const x = w.spawnX;
-      let kind = pick(["single", "run", "run", "arc", "gems", "power"]);
-      if (w.t < 5) kind = "gems";
-      if (kind === "power" && w.t < 12) kind = "gems";
-      if (kind === "single") {
-        const side = pick([1, -1]);
-        const n = Math.random() < 0.5 ? 2 : 3;
-        addSpike(x, side, n);
-        for (let i = 0; i < 4; i++) addPick(x + 10 + i * 34, surfaceY(-side), "gem");
-        w.spawnX = x + n * SPIKE_S + rand(280, 360);
-      } else if (kind === "run") {
-        const gapX = Math.max(250, w.speed * 0.66);
-        const count = 3 + Math.floor(rand(0, 3));
-        let side = pick([1, -1]);
-        let cx = x;
-        for (let i = 0; i < count; i++) {
-          addSpike(cx, side, 2);
-          addPick(cx + (gapX + 68) / 2, surfaceY(-side), "gem");
-          side = Math.random() < 0.75 ? -side : side;
-          cx += gapX;
-        }
-        w.spawnX = cx + 200;
-      } else if (kind === "arc") {
-        const base = pick([300, 250]);
-        for (let i = 0; i < 7; i++) addPick(x + i * 36, base - 110 * Math.sin((i / 6) * Math.PI), "gem");
-        w.spawnX = x + 6 * 36 + 300;
-      } else if (kind === "gems") {
-        const side = pick([1, -1]);
-        for (let i = 0; i < 6; i++) addPick(x + i * 34, surfaceY(side), "gem");
-        w.spawnX = x + 5 * 34 + 260;
-      } else {
-        const side = pick([1, -1]);
-        addPick(x + 20, surfaceY(side), pick(["shield", "magnet"]));
-        w.spawnX = x + 300;
-      }
+  function load() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return fresh();
+      const d = JSON.parse(raw);
+      const f = fresh();
+      return Object.assign(f, d, { lv: Object.assign(f.lv, d.lv || {}) });
+    } catch (e) {
+      return fresh();
     }
   }
 
-  function flip() {
-    if (st !== "play" || !w || w.dying) return;
-    const p = w.p;
-    p.dir = -p.dir;
-    p.vy = 0;
-    p.squash = 1;
-    p.ring = 1;
-    burst(PX(), p.y, p.dir > 0 ? "cyan" : "pink", 14, 220);
-    sfx("flip");
+  function save() {
+    state.lastSeen = Date.now();
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch (e) { return; }
   }
 
-  function updatePlayer(dt) {
-    const p = w.p;
-    p.vy += GRAV * p.dir * dt;
-    p.y += p.vy * dt;
-    const lo = CEIL + R;
-    const hi = FLOOR - R;
-    if (p.y >= hi) {
-      p.y = hi;
-      if (p.vy > 0) p.vy = 0;
+  let state = load();
+
+  function fmt(n) {
+    if (n < 1000) return String(Math.floor(n));
+    let i = 0;
+    let v = n;
+    while (v >= 1000 && i < SUF.length - 1) {
+      v /= 1000;
+      i++;
     }
-    if (p.y <= lo) {
-      p.y = lo;
-      if (p.vy < 0) p.vy = 0;
-    }
-    p.squash = Math.max(0, p.squash - dt * 5);
-    p.ring = Math.max(0, p.ring - dt * 3);
-    p.trail -= dt;
-    if (p.trail <= 0) {
-      p.trail = 0.016;
-      w.parts.push({ kind: "spark", x: PX(), y: p.y, vx: -w.speed * 0.25 + rand(-30, 30), vy: rand(-25, 25), life: 0, max: 0.4, size: 8, g: p.dir > 0 ? "cyan" : "pink" });
-    }
+    const s = v >= 100 ? v.toFixed(0) : v.toFixed(1);
+    return s.replace(/\.0$/, "") + SUF[i];
   }
 
-  function updateWorld(dt) {
-    w.t += dt;
-    w.speed = 360 + Math.min(340, w.t * 7);
-    const d = w.speed * dt;
-    w.bgX += d * 0.22;
-    w.score += d * 0.02;
-    w.spawnX -= d;
-    w.magnet = Math.max(0, w.magnet - dt);
-    w.obs.forEach(function (o) { o.x -= d; });
-    w.pick.forEach(function (k) { k.x -= d; });
-    w.obs = w.obs.filter(function (o) { return !o.dead && o.x + o.w > -60; });
+  function fmtTime(sec) {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    if (h > 0) return h + " ч " + m + " мин";
+    return Math.max(1, m) + " мин";
   }
 
-  function take(k) {
-    k.taken = true;
-    if (k.kind === "gem") {
-      w.combo++;
-      w.maxCombo = Math.max(w.maxCombo, w.combo);
-      w.mult = 1 + Math.min(7, Math.floor(w.combo / 5));
-      w.gems++;
-      const pts = 10 * w.mult;
-      w.score += pts;
-      burst(k.x, k.y, "gold", 10, 260);
-      text("+" + pts, k.x, k.y - 16, "gold");
-      sfx("coin");
-    } else if (k.kind === "shield") {
-      w.shield = true;
-      burst(k.x, k.y, "blue", 18, 300);
-      text("ЩИТ", k.x, k.y - 16, "blue");
-      sfx("power");
-    } else {
-      w.magnet = 6;
-      burst(k.x, k.y, "violet", 18, 300);
-      text("МАГНИТ", k.x, k.y - 16, "violet");
-      sfx("power");
-    }
+  function beeCount() { return 1 + state.lv.bee + state.extra; }
+  function flowerCount() { return 3 + state.lv.flower; }
+  function jellyMult() { return Math.pow(1.25, state.lv.jelly); }
+  function royalMult() { return 1 + 0.2 * state.royal; }
+  function tapValue() { return (1 + state.lv.comb) * jellyMult() * royalMult(); }
+  function perSec() {
+    return beeCount() * (1 + 0.06 * flowerCount()) * jellyMult() * royalMult() + state.lv.auto * tapValue();
+  }
+  function royalGain() { return Math.floor(Math.sqrt(state.total / ROYAL_NEED)); }
+
+  function costFor(u, n) {
+    const lv = state.lv[u.id];
+    return u.base * Math.pow(u.grow, lv) * (Math.pow(u.grow, n) - 1) / (u.grow - 1);
   }
 
-  function checkPicks() {
-    const px = PX();
-    const py = w.p.y;
-    w.pick.forEach(function (k) {
-      if (k.taken) return;
-      if (w.magnet > 0 && k.kind === "gem") {
-        const mx = px - k.x;
-        const my = py - k.y;
-        if (mx * mx + my * my < 220 * 220) {
-          k.x += mx * 0.12;
-          k.y += my * 0.12;
-        }
-      }
-      const dx = k.x - px;
-      const dy = k.y - py;
-      if (dx * dx + dy * dy < (R + 16) * (R + 16)) {
-        take(k);
-      } else if (k.kind === "gem" && k.x < px - 24) {
-        k.taken = true;
-        w.combo = 0;
-        w.mult = 1;
+  function buyCount(u) {
+    return Math.max(0, Math.min(state.mode, u.max - state.lv[u.id]));
+  }
+
+  function buy(u) {
+    let n = buyCount(u);
+    while (n > 0 && state.honey < costFor(u, n)) n--;
+    if (n <= 0) return;
+    state.honey -= costFor(u, n);
+    state.lv[u.id] += n;
+    sfx("buy");
+    renderShop();
+    save();
+  }
+
+  function addHoney(v) {
+    state.honey += v;
+    state.total += v;
+    MILES.forEach(function (m, i) {
+      if (state.total >= m[0] && state.ach.indexOf(i) < 0) {
+        state.ach.push(i);
+        toast(m[1]);
+        sfx("mile");
       }
     });
-    w.pick = w.pick.filter(function (k) { return !k.taken && k.x > -60; });
   }
 
-  function die() {
-    if (w.dying) return;
-    w.dying = true;
-    w.deadT = 0;
-    const px = PX();
-    burst(px, w.p.y, "pink", 50, 520);
-    burst(px, w.p.y, "white", 26, 380);
-    w.shake = 22;
-    w.flash = 1;
-    sfx("hit");
-    if (navigator.vibrate) navigator.vibrate(80);
+  function toast(str) {
+    const el = document.createElement("div");
+    el.className = "toast";
+    el.textContent = str;
+    $("toasts").appendChild(el);
+    setTimeout(function () { el.remove(); }, 2600);
   }
 
-  function checkObstacles() {
-    const px = PX();
-    const py = w.p.y;
-    for (let i = 0; i < w.obs.length; i++) {
-      const o = w.obs[i];
-      if (o.x > px + R + 40 || o.x + o.w < px - R - 40) continue;
-      const tip = o.side > 0 ? FLOOR - SPIKE_H * 0.8 : CEIL + SPIKE_H * 0.8;
-      const edge = o.side > 0 ? py + R : py - R;
-      const gap = o.side > 0 ? tip - edge : edge - tip;
-      const overlapX = px + 8 > o.x + 4 && px - 8 < o.x + o.w - 4;
-      if (overlapX && gap < 0) {
-        if (w.shield) {
-          w.shield = false;
-          o.dead = true;
-          burst(px, py, "blue", 30, 360);
-          w.shake = 10;
-          sfx("shield");
-          return;
-        }
-        die();
-        return;
-      }
-      const nearX = px + R + 14 > o.x && px - R - 14 < o.x + o.w;
-      if (!o.near && nearX && gap >= 0 && gap < 16) {
-        o.near = true;
-        w.near++;
-        w.score += 50;
-        text("БЛИЗКО +50", px, py - 36, "cyan");
-        burst(px, edge, "cyan", 8, 200);
-        sfx("near");
+  let modalOk = null;
+  function openModal(title, text, okText, onOk, cancelText) {
+    $("modal-title").textContent = title;
+    $("modal-text").textContent = text;
+    $("modal-ok").textContent = okText || "Ок";
+    $("modal-cancel").textContent = cancelText || "Отмена";
+    $("modal-cancel").classList.toggle("hidden", !cancelText);
+    modalOk = onOk || null;
+    $("modal").classList.add("show");
+  }
+
+  function closeModal() {
+    $("modal").classList.remove("show");
+    modalOk = null;
+  }
+
+  function prestige(g) {
+    state = Object.assign(fresh(), {
+      royal: state.royal + g,
+      ach: state.ach,
+      ending: state.ending,
+      mode: state.mode,
+      muted: state.muted
+    });
+    sfx("mile");
+    toast("Новый рой: +" + g);
+    syncSound();
+    renderShop();
+    save();
+  }
+
+  function askPrestige() {
+    const g = royalGain();
+    if (g <= 0) return;
+    const after = Math.round(20 * (state.royal + g));
+    openModal("Новый рой", "Мёд и улучшения сбросятся. Получишь +" + g + " к бонусу, он станет +" + after + "% ко всему сбору.", "Начать", function () { prestige(g); }, "Отмена");
+  }
+
+  function applyOffline() {
+    const away = Math.min((Date.now() - state.lastSeen) / 1000, OFFLINE_MAX);
+    if (away < 30) return;
+    const gain = perSec() * away * OFFLINE_RATE;
+    if (gain < 1) return;
+    addHoney(gain);
+    openModal("Пока тебя не было", "Рой работал " + fmtTime(away) + " и собрал +" + fmt(gain) + " мёда.", "Ок");
+  }
+
+  function showEnding() {
+    state.ending = true;
+    openModal("Королевский рой", "Ты поднял " + state.royal + " роёв. Улей процветает, можно продолжать дальше.", "Продолжить");
+    save();
+  }
+
+  function tick(dt) {
+    addHoney(perSec() * dt);
+    if (state.lv.nursery > 0) {
+      state.nurse += dt * state.lv.nursery;
+      while (state.nurse >= 20) {
+        state.nurse -= 20;
+        state.extra++;
+        toast("Родилась пчела");
       }
     }
+    if (!state.ending && state.royal >= ENDING_ROYAL) showEnding();
+  }
+
+  let actx = null;
+  let master = null;
+
+  function audio() {
+    if (!actx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      actx = new AC();
+      master = actx.createGain();
+      master.gain.value = state.muted ? 0 : 0.6;
+      master.connect(actx.destination);
+    }
+    if (actx.state === "suspended") actx.resume();
+    return actx;
+  }
+
+  function beep(f0, f1, dur, vol, type) {
+    const a = audio();
+    if (!a || state.muted) return;
+    const t = a.currentTime;
+    const o = a.createOscillator();
+    const g = a.createGain();
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(f0, t);
+    if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g);
+    g.connect(master);
+    o.start(t);
+    o.stop(t + dur + 0.03);
+  }
+
+  function sfx(k) {
+    if (k === "tap") beep(660, 880, 0.1, 0.15);
+    else if (k === "buy") beep(440, 660, 0.15, 0.2, "triangle");
+    else if (k === "pop") beep(1200, 600, 0.08, 0.1);
+    else if (k === "mile") {
+      beep(523, 0, 0.2, 0.2, "triangle");
+      setTimeout(function () { beep(659, 0, 0.2, 0.2, "triangle"); }, 120);
+      setTimeout(function () { beep(784, 0, 0.3, 0.2, "triangle"); }, 240);
+    }
+  }
+
+  function syncSound() {
+    if (master) master.gain.value = state.muted ? 0 : 0.6;
+    $("sound-btn").textContent = state.muted ? "Звук: выкл" : "Звук: вкл";
+  }
+
+  function buildShop() {
+    UPG.forEach(function (u) {
+      const el = document.createElement("button");
+      el.className = "item";
+      el.type = "button";
+      el.innerHTML = '<div class="it-top"><b></b><span class="lv"></span></div><div class="it-desc"></div><div class="it-price"></div>';
+      el.querySelector("b").textContent = u.name;
+      el.querySelector(".it-desc").textContent = u.desc;
+      el.addEventListener("click", function () { buy(u); });
+      $("items").appendChild(el);
+      u.el = el;
+      u.lvEl = el.querySelector(".lv");
+      u.priceEl = el.querySelector(".it-price");
+    });
+  }
+
+  function renderShop() {
+    UPG.forEach(function (u) {
+      const n = buyCount(u);
+      u.lvEl.textContent = "ур. " + state.lv[u.id];
+      if (n <= 0) {
+        u.priceEl.textContent = "Максимум";
+        u.el.disabled = true;
+        u.el.classList.remove("can");
+        return;
+      }
+      const c = costFor(u, n);
+      const can = state.honey >= c;
+      u.priceEl.textContent = "Купить x" + n + " — " + fmt(c);
+      u.el.disabled = !can;
+      u.el.classList.toggle("can", can);
+    });
+    document.querySelectorAll(".mode").forEach(function (b) {
+      b.classList.toggle("on", Number(b.dataset.mode) === state.mode);
+    });
+    $("stats").textContent = "Пчёл " + beeCount() + " · Цветов " + flowerCount();
+  }
+
+  function renderHud() {
+    $("honey").textContent = fmt(state.honey);
+    $("rate").textContent = "+" + fmt(perSec()) + "/с";
+    const g = royalGain();
+    const rb = $("royal-btn");
+    rb.disabled = g <= 0;
+    rb.classList.toggle("ready", g > 0);
+    rb.textContent = g > 0 ? "Новый рой +" + g : "Новый рой (от 1 млн)";
+  }
+
+  const flowers = [];
+  for (let i = 0; i < MAX_FLOWERS_SHOWN; i++) {
+    flowers.push({ nx: rand(0.04, 0.64), ny: rand(0.58, 0.9), ph: rand(0, 6.28), bloom: 1, c: PALETTE[i % PALETTE.length] });
+  }
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+
+  const cells = [];
+  (function buildCells() {
+    const r = 7.5;
+    for (let row = -9; row <= 0; row++) {
+      for (let col = -9; col <= 9; col++) {
+        const dx = col * r * 1.75 + (row % 2 ? r * 0.87 : 0);
+        const dy = row * r * 1.5 - 40;
+        if (dx * dx + (dy + 40) * (dy + 40) / 1.5 < 92 * 92 && dy < -2) cells.push({ dx: dx, dy: dy, d: Math.hypot(dx, dy + 60) });
+      }
+    }
+    cells.sort(function (a, b) { return a.d - b.d; });
+  })();
+  let shownCells = 0;
+  let hivePulse = 0;
+  const HIVE_W = 300;
+  const HIVE_H = 230;
+  const HIVE_OX = 150;
+  const HIVE_OY = 160;
+  let hiveCache = null;
+  let hiveKey = -1;
+  let hiveK = 0;
+
+  const bees = [];
+  let particles = [];
+  let texts = [];
+
+  function hiveX() { return LW * 0.3; }
+  function hiveY() { return LH * 0.64; }
+
+  function flowerPos(f) {
+    return { x: f.nx * LW, y: f.ny * LH };
+  }
+
+  function pickTarget(b) {
+    if (b.toHive) {
+      b.tx = hiveX();
+      b.ty = hiveY() + 12;
+    } else {
+      const n = Math.min(flowerCount(), MAX_FLOWERS_SHOWN);
+      const f = flowers[Math.floor(Math.random() * n)];
+      const p = flowerPos(f);
+      b.tx = p.x + rand(-10, 10);
+      b.ty = p.y - 20 + rand(-10, 10);
+    }
+  }
+
+  function syncBees() {
+    const n = Math.min(beeCount(), MAX_BEES_SHOWN);
+    while (bees.length < n) {
+      const b = { x: hiveX(), y: hiveY() + 12, tx: 0, ty: 0, toHive: false, ph: rand(0, 6.28), sp: rand(150, 230) };
+      pickTarget(b);
+      bees.push(b);
+    }
+    if (bees.length > n) bees.length = n;
+  }
+
+  function updateBees(dt, t) {
+    bees.forEach(function (b) {
+      const dx = b.tx - b.x;
+      const dy = b.ty - b.y;
+      const d = Math.hypot(dx, dy);
+      if (d < 8) {
+        b.toHive = !b.toHive;
+        pickTarget(b);
+        return;
+      }
+      const step = Math.min(d, b.sp * dt);
+      b.x += dx / d * step + Math.sin(t * 6 + b.ph) * 0.6;
+      b.y += dy / d * step + Math.cos(t * 5 + b.ph) * 0.6;
+      b.ang = Math.atan2(dy, dx);
+    });
+  }
+
+  function burst(x, y, c, n, sp) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const v = sp * rand(0.3, 1);
+      particles.push({ x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 60, life: 0, max: rand(0.5, 0.9), c: c, r: rand(2, 4.5) });
+    }
+    if (particles.length > 300) particles.splice(0, particles.length - 300);
+  }
+
+  function popup(str, x, y) {
+    texts.push({ str: str, x: x, y: y, life: 0, max: 0.9 });
   }
 
   function updateFx(dt) {
-    w.parts.forEach(function (p) {
+    particles.forEach(function (p) {
       p.life += dt;
-      if (p.kind === "spark") {
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
-        p.vx *= Math.exp(-3 * dt);
-        p.vy *= Math.exp(-3 * dt);
-      }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 260 * dt;
     });
-    w.parts = w.parts.filter(function (p) { return p.life < p.max; });
-    w.texts.forEach(function (t) { t.life += dt; });
-    w.texts = w.texts.filter(function (t) { return t.life < t.max; });
+    particles = particles.filter(function (p) { return p.life < p.max; });
+    texts.forEach(function (t) { t.life += dt; });
+    texts = texts.filter(function (t) { return t.life < t.max; });
   }
 
-  function gameOver() {
-    st = "over";
-    musicStop();
-    sfx("over");
-    const score = Math.floor(w.score);
-    const isBest = score > best;
-    if (isBest) {
-      best = score;
-      writeVal(BEST_KEY, String(best));
+  function hexPath(g, cx, cy, r) {
+    g.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = Math.PI / 3 * i + Math.PI / 6;
+      const x = cx + Math.cos(a) * r;
+      const y = cy + Math.sin(a) * r;
+      if (i === 0) g.moveTo(x, y);
+      else g.lineTo(x, y);
     }
-    $("over-score").textContent = String(score);
-    $("over-gems").textContent = String(w.gems);
-    $("over-combo").textContent = "x" + w.maxCombo;
-    $("over-near").textContent = String(w.near);
-    $("over-note").textContent = isBest ? "НОВЫЙ РЕКОРД" : "Рекорд " + best;
-    setUI("over");
-  }
-
-  function setUI(view) {
-    ["menu", "pause", "over"].forEach(function (n) { $(n).classList.toggle("show", view === n); });
-    $("hud").classList.toggle("show", view === "play" || view === "pause");
-  }
-
-  function startGame() {
-    audioReady();
-    musicStart();
-    sfx("start");
-    w = newWorld();
-    st = "play";
-    setUI("play");
-  }
-
-  function pauseGame() {
-    if (st !== "play" || w.dying) return;
-    st = "pause";
-    setUI("pause");
-  }
-
-  function resumeGame() {
-    if (st !== "pause") return;
-    st = "play";
-    setUI("play");
-  }
-
-  function toMenu() {
-    st = "menu";
-    w = newWorld();
-    refreshMenu();
-    setUI("menu");
-  }
-
-  function refreshMenu() {
-    $("menu-best").textContent = best ? "Рекорд: " + best : "Рекорд пока не поставлен";
-  }
-
-  const hudCache = {};
-  function setText(id, s) {
-    if (hudCache[id] !== s) {
-      hudCache[id] = s;
-      $(id).textContent = s;
-    }
-  }
-
-  function updateHud() {
-    setText("score", String(Math.floor(w.score)));
-    setText("mult", "x" + w.mult);
-    $("shield-ind").classList.toggle("show", w.shield);
-    $("magnet-ind").classList.toggle("show", w.magnet > 0);
-  }
-
-  function glow(sprite, x, y, r, alpha) {
-    ctx.globalAlpha = alpha;
-    ctx.globalCompositeOperation = "lighter";
-    ctx.drawImage(sprite, x - r, y - r, r * 2, r * 2);
-    ctx.globalCompositeOperation = "source-over";
-    ctx.globalAlpha = 1;
+    g.closePath();
   }
 
   function drawBackground() {
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = "#0b0620";
-    ctx.fillRect(0, 0, W, H);
-    if (bgReady) {
-      const sc = Math.max(W / bgImg.width, H / bgImg.height);
-      const dw = bgImg.width * sc;
-      const dh = bgImg.height * sc;
-      const ox = -((w.bgX * S * 0.5) % dw);
-      const oy = (H - dh) / 2;
-      ctx.drawImage(bgImg, ox, oy, dw, dh);
-      ctx.drawImage(bgImg, ox + dw, oy, dw, dh);
-    }
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, "rgba(11,6,32,0.25)");
-    g.addColorStop(1, "rgba(11,6,32,0.78)");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = "#2b1d08";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (bgCanvas) ctx.drawImage(bgCanvas, 0, 0);
   }
 
-  function neon(y, color) {
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = 0.28;
-    ctx.lineWidth = 12;
-    ctx.beginPath();
-    ctx.moveTo(-20, y);
-    ctx.lineTo(LW + 20, y);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(-20, y);
-    ctx.lineTo(LW + 20, y);
-    ctx.stroke();
+  function drawFlowers(t) {
+    const n = Math.min(flowerCount(), MAX_FLOWERS_SHOWN);
+    for (let i = 0; i < n; i++) {
+      const f = flowers[i];
+      if (f.bloom < 1) f.bloom = Math.min(1, f.bloom + 0.02);
+      const p = flowerPos(f);
+      const sway = Math.sin(t * 1.3 + f.ph) * 5;
+      ctx.strokeStyle = "rgba(90,140,60,0.9)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.quadraticCurveTo(p.x + sway * 0.4, p.y + 25, p.x + sway, p.y + 48);
+      ctx.stroke();
+      const pr = 4 + 8 * f.bloom;
+      ctx.fillStyle = f.c;
+      for (let k = 0; k < 5; k++) {
+        const a = k / 5 * Math.PI * 2 + t * 0.2;
+        ctx.beginPath();
+        ctx.arc(p.x + sway + Math.cos(a) * pr * 0.9, p.y - 20 + Math.sin(a) * pr * 0.9, pr * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = "#ffd34e";
+      ctx.beginPath();
+      ctx.arc(p.x + sway, p.y - 20, pr * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
-  function drawTrack() {
-    const fg = ctx.createLinearGradient(0, FLOOR, 0, LH);
-    fg.addColorStop(0, "rgba(255,62,207,0.2)");
-    fg.addColorStop(1, "rgba(20,8,40,0.95)");
-    ctx.fillStyle = fg;
-    ctx.fillRect(-20, FLOOR, LW + 40, LH - FLOOR + 20);
-    const cg = ctx.createLinearGradient(0, 0, 0, CEIL);
-    cg.addColorStop(0, "rgba(20,8,40,0.95)");
-    cg.addColorStop(1, "rgba(63,243,255,0.2)");
-    ctx.fillStyle = cg;
-    ctx.fillRect(-20, -20, LW + 40, CEIL + 20);
-    const off = (w.bgX * 1.6) % 70;
-    ctx.globalCompositeOperation = "lighter";
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(255,62,207,0.16)";
-    ctx.beginPath();
-    for (let x = -off; x < LW + 70; x += 70) {
-      ctx.moveTo(x, FLOOR);
-      ctx.lineTo(x - 30, LH + 10);
-    }
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(63,243,255,0.16)";
-    ctx.beginPath();
-    for (let x = -off; x < LW + 70; x += 70) {
-      ctx.moveTo(x, CEIL);
-      ctx.lineTo(x - 30, -10);
-    }
-    ctx.stroke();
-    ctx.globalCompositeOperation = "source-over";
-    neon(FLOOR, COLORS.pink);
-    neon(CEIL, COLORS.cyan);
-    ctx.globalAlpha = 1;
-  }
-
-  function drawStars(t) {
-    ctx.globalCompositeOperation = "lighter";
-    stars.forEach(function (s) {
-      const x = (((s.x * LW - w.bgX * s.v * 3) % LW) + LW) % LW;
-      ctx.globalAlpha = 0.35 + 0.35 * Math.sin(t * 2 + s.p);
-      ctx.fillStyle = "#cfe9ff";
-      ctx.fillRect(x, s.y * LH, s.r, s.r);
+  function paintHive(g, filled) {
+    const grad = g.createLinearGradient(0, -130, 0, 30);
+    grad.addColorStop(0, "#ffe08a");
+    grad.addColorStop(0.55, "#d99a35");
+    grad.addColorStop(1, "#7a4a14");
+    g.beginPath();
+    g.moveTo(-112, 34);
+    g.bezierCurveTo(-112, -72, -60, -128, 0, -128);
+    g.bezierCurveTo(60, -128, 112, -72, 112, 34);
+    g.closePath();
+    g.fillStyle = grad;
+    g.fill();
+    g.strokeStyle = "#5b3209";
+    g.lineWidth = 3;
+    g.stroke();
+    g.strokeStyle = "rgba(91,50,9,0.45)";
+    g.lineWidth = 2;
+    [-96, -60, -26].forEach(function (y) {
+      g.beginPath();
+      g.moveTo(-108, y + 6);
+      g.quadraticCurveTo(0, y - 6, 108, y + 6);
+      g.stroke();
     });
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      hexPath(g, c.dx, c.dy, 7);
+      if (i < filled) {
+        g.fillStyle = "#ffc83d";
+        g.fill();
+        g.strokeStyle = "#8c5418";
+      } else {
+        g.fillStyle = "rgba(91,50,9,0.35)";
+        g.fill();
+        g.strokeStyle = "rgba(91,50,9,0.6)";
+      }
+      g.lineWidth = 1.2;
+      g.stroke();
+    }
+    g.fillStyle = "#3a2107";
+    g.beginPath();
+    g.ellipse(0, 26, 18, 9, 0, 0, Math.PI * 2);
+    g.fill();
   }
 
-  function drawObstacle(o) {
-    const top = o.side > 0 ? FLOOR : CEIL;
-    const dir = o.side > 0 ? -1 : 1;
+  function drawHive() {
+    const hx = hiveX();
+    const hy = hiveY();
+    const filled = Math.round(shownCells);
+    const k = S * dpr;
+    if (!hiveCache) hiveCache = document.createElement("canvas");
+    if (hiveKey !== filled || hiveK !== k) {
+      hiveCache.width = Math.ceil(HIVE_W * k);
+      hiveCache.height = Math.ceil(HIVE_H * k);
+      const g = hiveCache.getContext("2d");
+      g.setTransform(k, 0, 0, k, HIVE_OX * k, HIVE_OY * k);
+      paintHive(g, filled);
+      hiveKey = filled;
+      hiveK = k;
+    }
+    ctx.fillStyle = "rgba(20,12,3,0.35)";
     ctx.beginPath();
-    for (let i = 0; i < o.n; i++) {
-      const x0 = o.x + i * SPIKE_S;
-      ctx.moveTo(x0, top);
-      ctx.lineTo(x0 + SPIKE_S / 2, top + dir * SPIKE_H);
-      ctx.lineTo(x0 + SPIKE_S, top);
-    }
-    ctx.fillStyle = "#ff4d6d";
+    ctx.ellipse(hx, hy + 44, 120, 14, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,0.85)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    glow(GLOW.pink, o.x + o.w / 2, top + dir * SPIKE_H * 0.35, o.w * 0.55, 0.35);
-  }
-
-  function drawPick(k, t) {
-    const y = k.y + Math.sin(t * 4 + k.spin) * 2;
-    if (k.kind === "gem") {
-      glow(GLOW.gold, k.x, y, 26, 0.7);
-      ctx.save();
-      ctx.translate(k.x, y);
-      ctx.rotate(Math.sin(t * 2.5 + k.spin) * 0.5);
-      ctx.beginPath();
-      ctx.moveTo(0, -11);
-      ctx.lineTo(8, 0);
-      ctx.lineTo(0, 11);
-      ctx.lineTo(-8, 0);
-      ctx.closePath();
-      ctx.fillStyle = COLORS.gold;
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(0, -5);
-      ctx.lineTo(3, 0);
-      ctx.lineTo(0, 5);
-      ctx.lineTo(-3, 0);
-      ctx.closePath();
-      ctx.fillStyle = "#fff8d6";
-      ctx.fill();
-      ctx.restore();
-    } else if (k.kind === "shield") {
-      glow(GLOW.blue, k.x, y, 34, 0.8);
-      ctx.beginPath();
-      ctx.arc(k.x, y, 12, 0, Math.PI * 2);
-      ctx.fillStyle = "#1c3c8a";
-      ctx.fill();
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = COLORS.blue;
-      ctx.stroke();
-      ctx.save();
-      ctx.setLineDash([5, 5]);
-      ctx.lineDashOffset = -t * 30;
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = "#9cc4ff";
-      ctx.beginPath();
-      ctx.arc(k.x, y, 19, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    } else {
-      glow(GLOW.violet, k.x, y, 34, 0.8);
-      ctx.beginPath();
-      ctx.arc(k.x, y, 12, 0, Math.PI * 2);
-      ctx.fillStyle = "#2a1959";
-      ctx.fill();
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = COLORS.violet;
-      ctx.stroke();
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "800 14px system-ui, sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("M", k.x, y + 1);
-    }
-  }
-
-  function drawPlayer(t) {
-    const p = w.p;
-    const x = PX();
-    const gk = p.dir > 0 ? "cyan" : "pink";
-    glow(GLOW[gk], x, p.y, 58, 0.9);
-    const sx = 1 + p.squash * 0.35;
-    const sy = 1 - p.squash * 0.25;
+    const pulse = 1 + hivePulse * 0.04;
     ctx.save();
-    ctx.translate(x, p.y);
-    ctx.scale(sx, sy);
-    ctx.beginPath();
-    ctx.arc(0, 0, R, 0, Math.PI * 2);
-    ctx.fillStyle = "#ffffff";
-    ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = COLORS[gk];
-    ctx.stroke();
+    ctx.translate(hx, hy);
+    ctx.scale(pulse, pulse);
+    ctx.drawImage(hiveCache, -HIVE_OX, -HIVE_OY, HIVE_W, HIVE_H);
     ctx.restore();
-    if (p.ring > 0) {
-      ctx.globalAlpha = p.ring;
-      ctx.strokeStyle = COLORS[gk];
-      ctx.lineWidth = 2;
+  }
+
+  function drawBees(t) {
+    bees.forEach(function (b) {
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(b.ang || 0);
+      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      ctx.save();
+      ctx.scale(1, 0.4 + 0.6 * Math.abs(Math.sin(t * 40 + b.ph)));
       ctx.beginPath();
-      ctx.arc(x, p.y, R + (1 - p.ring) * 42, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
-    if (w.shield) {
-      glow(GLOW.blue, x, p.y, 40, 0.5);
+      ctx.ellipse(-2, -6, 5, 3, -0.3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = "#ffd34e";
       ctx.beginPath();
-      ctx.arc(x, p.y, R + 11 + Math.sin(t * 8) * 1.5, 0, Math.PI * 2);
-      ctx.strokeStyle = COLORS.blue;
-      ctx.lineWidth = 3;
-      ctx.stroke();
-    }
+      ctx.ellipse(0, 0, 7, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#2b1d08";
+      ctx.fillRect(-2.5, -5, 2, 10);
+      ctx.fillRect(1.5, -5, 2, 10);
+      ctx.restore();
+    });
   }
 
   function drawFx() {
-    w.parts.forEach(function (p) {
+    ctx.globalCompositeOperation = "lighter";
+    particles.forEach(function (p) {
       const k = p.life / p.max;
-      if (p.kind === "ring") {
-        ctx.globalAlpha = (1 - k) * 0.9;
-        ctx.strokeStyle = COLORS[p.g];
-        ctx.lineWidth = 3 * (1 - k) + 0.5;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.r + k * 90, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-      } else {
-        glow(GLOW[p.g], p.x, p.y, p.size * (1 - k * 0.6), 1 - k);
-      }
+      ctx.globalAlpha = 1 - k;
+      ctx.fillStyle = p.c;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r * (1 - k * 0.5), 0, Math.PI * 2);
+      ctx.fill();
     });
-    ctx.font = "800 22px system-ui, sans-serif";
+    ctx.globalCompositeOperation = "source-over";
+    ctx.font = "800 20px system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    w.texts.forEach(function (t) {
-      const k = t.life / t.max;
+    texts.forEach(function (tx) {
+      const k = tx.life / tx.max;
       ctx.globalAlpha = 1 - k;
-      ctx.fillStyle = COLORS[t.g];
-      ctx.fillText(t.str, t.x, t.y - k * 34);
+      ctx.fillStyle = "#ffd34e";
+      ctx.fillText(tx.str, tx.x, tx.y - k * 36);
     });
     ctx.globalAlpha = 1;
   }
 
-  function render(t) {
+  function drawScene(t) {
     drawBackground();
     ctx.setTransform(dpr * S, 0, 0, dpr * S, 0, 0);
-    if (w.shake > 0) ctx.translate(rand(-w.shake, w.shake), rand(-w.shake, w.shake));
-    drawStars(t);
-    drawTrack();
-    w.obs.forEach(drawObstacle);
-    w.pick.forEach(function (k) { drawPick(k, t); });
-    drawPlayer(t);
+    drawFlowers(t);
+    drawHive(t);
+    drawBees(t);
     drawFx();
-    if (w.flash > 0) {
-      ctx.fillStyle = "rgba(255,255,255," + (w.flash * 0.45).toFixed(3) + ")";
-      ctx.fillRect(-60, -60, LW + 120, LH + 120);
+  }
+
+  function onTap(e) {
+    if ($("modal").classList.contains("show")) return;
+    audio();
+    const x = e.clientX / S;
+    const y = e.clientY / S;
+    const hx = hiveX();
+    const hy = hiveY();
+    if (Math.hypot(x - hx, y - hy) < 120) {
+      const v = tapValue();
+      addHoney(v);
+      hivePulse = 1;
+      burst(x, y, "#ffd34e", 12, 220);
+      popup("+" + fmt(v), x, y - 20);
+      sfx("tap");
+      return;
+    }
+    const n = Math.min(flowerCount(), MAX_FLOWERS_SHOWN);
+    for (let i = 0; i < n; i++) {
+      const p = flowerPos(flowers[i]);
+      if (Math.hypot(x - p.x, y - (p.y - 20)) < 34) {
+        const v = tapValue() * 2;
+        addHoney(v);
+        flowers[i].bloom = 0;
+        burst(p.x, p.y - 20, flowers[i].c, 10, 180);
+        popup("+" + fmt(v), p.x, p.y - 40);
+        sfx("pop");
+        return;
+      }
     }
   }
 
   let last = performance.now();
+  let clock = 0;
+  let shopAcc = 0;
+  let saveAcc = 0;
+
   function frame(now) {
-    const dt = Math.min(0.033, (now - last) / 1000);
+    const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
-    if (st === "play" && H > W) pauseGame();
-    if (st === "play") {
-      const k = w.dying ? 0.3 : 1;
-      updatePlayer(dt * k);
-      if (!w.dying) {
-        updateWorld(dt);
-        spawnAhead();
-        checkPicks();
-        checkObstacles();
-      } else {
-        w.deadT += dt;
-        if (w.deadT > 1.1) gameOver();
-      }
-      updateFx(dt * k);
-      w.flash = Math.max(0, w.flash - dt * 1.5);
-      w.shake = Math.max(0, w.shake - dt * 50);
-      updateHud();
-    } else {
-      w.bgX += dt * 40;
-      updateFx(dt);
+    clock += dt;
+    if (!$("modal").classList.contains("show")) tick(dt);
+    syncBees();
+    updateBees(dt, clock);
+    const target = Math.min(cells.length, Math.floor(Math.log10(state.total + 1) * 9));
+    shownCells += (target - shownCells) * Math.min(1, dt * 3);
+    hivePulse = Math.max(0, hivePulse - dt * 4);
+    updateFx(dt);
+    drawScene(clock);
+    shopAcc += dt;
+    if (shopAcc > 0.25) {
+      shopAcc = 0;
+      renderHud();
+      renderShop();
     }
-    render(now / 1000);
+    saveAcc += dt;
+    if (saveAcc > 3) {
+      saveAcc = 0;
+      save();
+    }
     requestAnimationFrame(frame);
   }
 
-  $("play-btn").addEventListener("click", startGame);
-  $("retry-btn").addEventListener("click", startGame);
-  $("pause-btn").addEventListener("click", pauseGame);
-  $("resume-btn").addEventListener("click", resumeGame);
-  $("pause-menu-btn").addEventListener("click", toMenu);
-  $("over-menu-btn").addEventListener("click", toMenu);
-  $("sound-btn").addEventListener("click", toggleSound);
-
-  $("app").addEventListener("pointerdown", function (e) {
-    if (e.target.closest && e.target.closest("button")) return;
-    flip();
+  $("royal-btn").addEventListener("click", askPrestige);
+  $("sound-btn").addEventListener("click", function () {
+    state.muted = !state.muted;
+    syncSound();
+    save();
   });
-
-  window.addEventListener("keydown", function (e) {
-    if (e.code === "Space" || e.code === "ArrowUp" || e.code === "KeyW") {
-      e.preventDefault();
-      if (st === "play") flip();
-      else if (st === "menu") startGame();
-    } else if (e.code === "Escape") {
-      if (st === "play") pauseGame();
-      else if (st === "pause") resumeGame();
+  document.querySelectorAll(".mode").forEach(function (b) {
+    b.addEventListener("click", function () {
+      state.mode = Number(b.dataset.mode);
+      renderShop();
+      save();
+    });
+  });
+  $("modal-ok").addEventListener("click", function () {
+    const cb = modalOk;
+    closeModal();
+    if (cb) cb();
+  });
+  $("modal-cancel").addEventListener("click", closeModal);
+  canvas.addEventListener("pointerdown", onTap);
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) {
+      save();
+    } else {
+      applyOffline();
+      save();
     }
   });
-
-  document.addEventListener("visibilitychange", function () {
-    if (document.hidden && st === "play") pauseGame();
-  });
-
+  window.addEventListener("pagehide", save);
   window.addEventListener("resize", resize);
 
   resize();
-  w = newWorld();
-  refreshSoundLabel();
-  refreshMenu();
-  setUI("menu");
+  buildShop();
+  syncSound();
+  applyOffline();
+  save();
+  renderShop();
+  renderHud();
   requestAnimationFrame(frame);
 })();
