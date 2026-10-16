@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test · скачать APK</title>
+<style>
+  .dl-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    box-sizing: border-box;
+    background: radial-gradient(ellipse at top, #1c1636 0%, #0c0b18 70%);
+    color: #ececf5;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .dl-card {
+    width: 100%;
+    max-width: 520px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 18px;
+    padding: 32px 28px;
+    box-sizing: border-box;
+  }
+  .dl-card h1 {
+    margin: 0 0 6px;
+    font-size: 34px;
+    letter-spacing: 0.5px;
+    color: #ffffff;
+  }
+  .dl-lead {
+    margin: 0 0 24px;
+    color: #b9b7cc;
+    line-height: 1.5;
+  }
+  .dl-btn {
+    display: block;
+    text-align: center;
+    padding: 16px 20px;
+    border-radius: 12px;
+    background: #b89cff;
+    color: #120d24;
+    font-weight: 700;
+    font-size: 18px;
+    text-decoration: none;
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  .dl-btn:hover {
+    background: #cbb5ff;
+    transform: translateY(-1px);
+  }
+  .dl-meta {
+    margin: 22px 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 15px;
+    color: #cfcde0;
+  }
+  .dl-meta li {
+    padding: 8px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+  }
+  .dl-meta b {
+    color: #ffffff;
+    font-weight: 600;
+  }
+  .dl-steps {
+    margin: 22px 0 0;
+    padding-left: 20px;
+    color: #cfcde0;
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  .dl-links {
+    margin-top: 24px;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    font-size: 15px;
+  }
+  .dl-links a {
+    color: #b89cff;
+  }
+  .dl-foot {
+    margin-top: 26px;
+    font-size: 13px;
+    color: #7d7a94;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+<main class="dl-page">
+  <section class="dl-card">
+    <h1>Test</h1>
+    <p class="dl-lead">Ритм-игра: ноты Tap, Drag, Flick и Hold, линия суждения, три трека и четыре сложности. Игра для Android.</p>
+
+    <a class="dl-btn" id="dl-apk" href="../">Скачать APK</a>
+
+    <ul class="dl-meta">
+      <li><b>Версия:</b> последняя сборка из ветки arena</li>
+      <li><b>Android:</b> 7.0 и новее</li>
+      <li><b>Тип:</b> debug-сборка, не из Google Play</li>
+    </ul>
+
+    <ol class="dl-steps">
+      <li>Нажми «Скачать APK» и открой файл из папки «Загрузки».</li>
+      <li>Если Android попросит, разреши установку из этого источника.</li>
+      <li>Установи и запусти. Поворот экрана в игре зафиксирован на альбомный.</li>
+    </ol>
+
+    <div class="dl-links">
+      <a id="dl-release" href="../">Все сборки (релиз apk-latest)</a>
+      <a href="../">Играть в браузере</a>
+    </div>
+
+    <p class="dl-foot">Сборка делается GitHub Actions из репозитория forcontact655-collab/Test. Если установка не получается, напиши, какая у тебя версия Android и модель телефона.</p>
+  </section>
+</main>
+<script>
+  (function () {
+    var host = ["https:", "", "github.com", "forcontact655-collab", "Test"].join("/");
+    document.getElementById("dl-apk").href = [host, "releases", "download", "apk-latest", "test-game-debug.apk"].join("/");
+    document.getElementById("dl-release").href = [host, "releases", "tag", "apk-latest"].join("/");
+  })();
+</script>
+</body>
+</html>
