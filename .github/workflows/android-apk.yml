@@ -66,6 +66,20 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
 
+      - name: Check APK contents
+        working-directory: ${{ runner.temp }}/app
+        run: |
+          apk=android/app/build/outputs/apk/debug/app-debug.apk
+          unzip -l "$apk" > apk-list.txt
+          grep -q 'assets/public/index.html' apk-list.txt
+          grep -q 'assets/public/game.js' apk-list.txt
+          grep -q 'assets/public/style.css' apk-list.txt
+          grep -q 'assets/public/track.m4a' apk-list.txt
+          grep -q 'assets/public/assets/bg.jpg' apk-list.txt
+          if grep -qi '\.pez' apk-list.txt; then exit 1; fi
+          grep -q 'META-INF/' apk-list.txt
+          ls -la "$apk"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
