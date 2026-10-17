@@ -43,6 +43,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/app/www/assets"
           cp index.html style.css game.js "$RUNNER_TEMP/app/www/"
           cp assets/mine.jpg "$RUNNER_TEMP/app/www/assets/"
+          cp assets/icon.png "$RUNNER_TEMP/app/www/assets/"
           cat > "$RUNNER_TEMP/app/capacitor.config.json" <<'EOF'
           {
             "appId": "com.forcontact655.gemmine",
@@ -68,6 +69,24 @@ jobs:
           sed -i -E "s/versionName \"[^\"]*\"/versionName \"1.0.${GITHUB_RUN_NUMBER}\"/" "$gradle_file"
           grep -q "versionCode ${GITHUB_RUN_NUMBER}" "$gradle_file"
           npx cap sync android
+
+      - name: Generate launcher icons
+        run: |
+          src="$GITHUB_WORKSPACE/assets/icon.png"
+          res="$RUNNER_TEMP/app/android/app/src/main/res"
+          for pair in mdpi:48:108 hdpi:72:162 xhdpi:96:216 xxhdpi:144:324 xxxhdpi:192:432; do
+            d=${pair%%:*}
+            rest=${pair#*:}
+            l=${rest%%:*}
+            f=${rest#*:}
+            dir="$res/mipmap-$d"
+            mkdir -p "$dir"
+            rm -f "$dir"/ic_launcher*.webp
+            convert "$src" -resize "${l}x${l}" "$dir/ic_launcher.png"
+            cp "$dir/ic_launcher.png" "$dir/ic_launcher_round.png"
+            convert "$src" -resize "${f}x${f}" "$dir/ic_launcher_foreground.png"
+          done
+          ls -la "$res/mipmap-xxxhdpi"
 
       - name: Build debug APK
         working-directory: ${{ runner.temp }}/app/android
@@ -144,6 +163,7 @@ jobs:
           mkdir -p site/assets
           cp index.html style.css game.js site/
           cp assets/mine.jpg site/assets/
+          cp assets/icon.png site/assets/
           cp -r download site/download
 
       - name: Configure Pages
