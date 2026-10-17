@@ -46,7 +46,7 @@ jobs:
           cat > "$RUNNER_TEMP/app/capacitor.config.json" <<'EOF'
           {
             "appId": "com.forcontact655.gemmine",
-            "appName": "Самоцветная шахта",
+            "appName": "Gemshaft",
             "webDir": "www"
           }
           EOF
@@ -118,7 +118,7 @@ jobs:
         run: |
           gh release delete apk-latest --cleanup-tag --yes || true
           gh release create apk-latest "$RUNNER_TEMP/out/gem-mine.apk" \
-            --title "Самоцветная шахта APK (последняя сборка)" \
+            --title "Gemshaft APK (latest build)" \
             --notes "Сборка из коммита ${GITHUB_SHA:0:7} (${GITHUB_REF_NAME}). Обновляется при каждом пуше в ветки arena." \
             --prerelease \
             --target "$GITHUB_SHA"
