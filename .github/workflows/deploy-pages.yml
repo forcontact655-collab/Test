@@ -20,6 +20,9 @@ jobs:
   apk:
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    env:
+      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -60,6 +63,10 @@ jobs:
           npx cap add android
           sed -i 's/android:name=".MainActivity"/android:name=".MainActivity" android:screenOrientation="sensorLandscape"/' android/app/src/main/AndroidManifest.xml
           grep -q 'sensorLandscape' android/app/src/main/AndroidManifest.xml
+          gradle_file=android/app/build.gradle
+          sed -i -E "s/versionCode [0-9]+/versionCode ${GITHUB_RUN_NUMBER}/" "$gradle_file"
+          sed -i -E "s/versionName \"[^\"]*\"/versionName \"1.0.${GITHUB_RUN_NUMBER}\"/" "$gradle_file"
+          grep -q "versionCode ${GITHUB_RUN_NUMBER}" "$gradle_file"
           npx cap sync android
 
       - name: Build debug APK
@@ -67,6 +74,17 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Sign APK with stable key
+        if: env.KEYSTORE_B64 != ''
+        working-directory: ${{ runner.temp }}/app
+        run: |
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.p12"
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          apk=android/app/build/outputs/apk/debug/app-debug.apk
+          "$bt/apksigner" sign --ks "$RUNNER_TEMP/release.p12" --ks-type PKCS12 --ks-pass env:KEYSTORE_PASS --out "$RUNNER_TEMP/signed.apk" "$apk"
+          mv "$RUNNER_TEMP/signed.apk" "$apk"
+          rm -f "$RUNNER_TEMP/release.p12"
 
       - name: Check APK contents
         working-directory: ${{ runner.temp }}/app
