@@ -170,6 +170,7 @@ jobs:
           cp assets/mine.jpg site/assets/
           cp assets/icon.png site/assets/
           cp -r download site/download
+          cp -r messenger site/messenger
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
