@@ -871,7 +871,6 @@
     }
     const switched = S.open !== id;
     S.open = id;
-    if (switched) { $("input").value = S.drafts.get(id) || ""; autosize(); }
     clearNativeNotifs(id);
     S.jumpMsg = jumpMsg || null;
     hideCtx();
@@ -883,6 +882,7 @@
     renderHeader();
     renderBars();
     renderComposer();
+    if (switched) { $("input").value = S.drafts.get(id) || ""; autosize(); }
     renderTimeline(true);
     renderSidebar();
     const r = navigator.onLine ? await sb.from("messages").select("*, reactions(message_id, user_id, emoji)").eq("chat_id", id).order("created_at", { ascending: false }).limit(80) : { data: null, error: { message: "Failed to fetch: offline" } };
@@ -1098,6 +1098,7 @@
 
   function autosize() {
     const ta = $("input");
+    if (ta.offsetParent === null) return; // поле скрыто: высоту посчитаем, когда покажем
     ta.style.height = "auto";
     ta.style.height = Math.min(ta.scrollHeight, 150) + "px";
   }
@@ -2034,15 +2035,34 @@
     syncMusic();
   }
 
+  // Аватар сворачивается в кружок на PP_R px прокрутки. Между состояниями палец тянет плавно,
+  // а после отпускания экран доезжает до полного фото или до кружка (по половине пути).
+  const PP_R = 110;
+  let ppCollapsed = false, ppTouching = false, ppSnapT = null;
   function onPpScroll() {
     const sc = Math.max(0, $("pp-scroll").scrollTop);
-    const pr = Math.min(1, sc / 60);
+    const p = Math.min(1, sc / PP_R);
     const full = Math.round(Math.min(540, Math.max(400, innerHeight * 0.52)));
-    const hh = Math.max(360, full - sc);
+    // Свёрнутый герой: кружок (до 164px), 8px отступ, блок с ником, статусом и кнопками (он прижат к низу)
+    const low = Math.min(full, 172 + $("pp-over").offsetHeight);
+    const hh = Math.round(full + (low - full) * p);
     $("pp-hero").style.height = hh + "px";
-    $("pp-body").style.marginTop = (full - hh) + "px";
-    $("pp-over").classList.toggle("pp-over-c", pr >= 0.5);
-    $("profile-page").style.setProperty("--p", pr.toFixed(3));
+    // тело страницы идёт сразу под героем, пока тот сворачивается
+    $("pp-body").style.marginTop = Math.min(sc, PP_R) + "px";
+    if (sc >= PP_R) ppCollapsed = true;
+    else if (sc <= 0) ppCollapsed = false;
+    $("pp-over").classList.toggle("pp-over-c", ppCollapsed);
+    $("profile-page").style.setProperty("--p", p.toFixed(3));
+  }
+  function ppSnap() {
+    const el = $("pp-scroll");
+    const sc = el.scrollTop;
+    if (ppTouching || sc <= 0 || sc >= PP_R) return;
+    el.scrollTo({ top: sc >= PP_R / 2 ? PP_R : 0, behavior: "smooth" });
+  }
+  function ppScheduleSnap() {
+    clearTimeout(ppSnapT);
+    ppSnapT = setTimeout(ppSnap, 140);
   }
 
   function pRow(label, value) {
@@ -2913,7 +2933,11 @@
     });
     $("pp-back").addEventListener("click", closeProfilePage);
     $("sp-back").addEventListener("click", closeSettingsPage);
-    $("pp-scroll").addEventListener("scroll", onPpScroll, { passive: true });
+    $("pp-scroll").addEventListener("scroll", function () { onPpScroll(); ppScheduleSnap(); }, { passive: true });
+    $("pp-scroll").addEventListener("touchstart", function () { ppTouching = true; }, { passive: true });
+    ["touchend", "touchcancel"].forEach(function (ev) {
+      $("pp-scroll").addEventListener(ev, function () { ppTouching = false; ppScheduleSnap(); }, { passive: true });
+    });
     $("pp-more").addEventListener("click", function () {
       const r = $("pp-more").getBoundingClientRect();
       ppMenu(Math.max(8, r.right - 230), r.bottom + 6);
