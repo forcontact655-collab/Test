@@ -528,7 +528,17 @@
   async function prepMsgs(list, c) {
     for (const m of list) {
       if (EchoE2E.isEncrypted(m.body) && m._plain === undefined) m._plain = await plainOf(m.body, c);
-      if (EchoE2E.isEncrypted(m.media_name) && m._pname === undefined) m._pname = await plainOf(m.media_name, c);
+      if (EchoE2E.isEncrypted(m.media_name) && m._pname === undefined) {
+        const raw = await plainOf(m.media_name, c);
+        if (raw.indexOf("🔒") === 0) {
+          m._plock = true;
+          m._pname = "";
+        } else {
+          const meta = parseMeta(raw);
+          m._pname = meta.n || "";
+          m._pmeta = meta.k ? meta : null;
+        }
+      }
     }
   }
   async function encryptFor(c, text) {
@@ -848,7 +858,7 @@
     if (deleted) {
       b.appendChild(h("div", { class: "gone", text: "Сообщение удалено" }));
     } else {
-      if (m.kind === "image" && m.media_url) b.appendChild(h("img", { class: "media", src: m.media_url, alt: "фото", loading: "lazy", onclick: function () { lightbox(m.media_url); } }));
+      if (m.kind === "image" && m.media_url) b.appendChild(imgEl(m));
       if (m.kind === "video" && m.media_url) b.appendChild(videoCard(m));
       if (m.kind === "audio" && m.media_url) b.appendChild(audioCard(m));
       if (m.kind === "sticker" && m.media_url) {
@@ -1267,10 +1277,11 @@
       targets.forEach(function (c) {
         b.appendChild(rowBtn(avEl(Object.assign({ size: "sm" }, chatAvProps(c))), chatTitle(c), kindLabel(c), async function () {
           closeSheet();
+          const fwd = await forwardPayload(m, c);
           const r = await sb.from("messages").insert({
             chat_id: c.id, sender_id: S.me.id, kind: m.kind, body: await outBody(c, shown(m) || ""),
-            media_url: m.media_url || null, forwarded_from: who,
-            media_name: m.media_name ? await outBody(c, mediaName(m) || "") : null, media_quality: m.media_quality || null
+            media_url: fwd.url, forwarded_from: who,
+            media_name: fwd.meta ? await outBody(c, fwd.meta) : null, media_quality: m.media_quality || null
           }).select("*").single();
           if (r.error) return toast(errMsg(r.error));
           toast("Переслано: " + chatTitle(c));
@@ -1395,6 +1406,10 @@
       throw new Error("Поддерживаются картинки, GIF, MP4 и WebM");
     }
     if (blob.size > opt.maxBytes) throw new Error("Файл больше " + Math.round(opt.maxBytes / MB) + " МБ");
+    if (opt.chat) {
+      const enc = await storeBlob(blob, ext, blob.type || file.type, opt.chat, "");
+      return { url: enc.url, animated: animated, meta: enc.meta };
+    }
     const path = S.me.id + "/" + folder + "/" + Date.now().toString(36) + rnd() + "." + ext;
     const up = await sb.storage.from("media").upload(path, blob, { contentType: blob.type || file.type, upsert: false });
     if (up.error) throw up.error;
@@ -1421,8 +1436,8 @@
     if (f.type.indexOf("audio/") === 0) return sendAudio(f, caption);
     try {
       toast("Загружаю…");
-      const res = await prepareAndUpload(f, "media", { maxSide: 1280, maxBytes: 20 * MB, quality: 0.86 });
-      await sendRow({ kind: "image", media_url: res.url, body: caption });
+      const res = await prepareAndUpload(f, "media", { maxSide: 1280, maxBytes: 20 * MB - 4096, quality: 0.86, chat: c });
+      await sendRow({ kind: "image", media_url: res.url, body: caption, media_name: res.meta });
       $("input").value = "";
       autosize();
     } catch (e) {
@@ -1470,11 +1485,11 @@
         blob = out;
         quality = key + "p";
       }
-      if (blob.size > 20 * MB) throw new Error("Видео больше 20 МБ, выбери качество ниже");
+      if (blob.size > 20 * MB - 4096) throw new Error("Видео больше 20 МБ, выбери качество ниже");
       const ext = blob.type.indexOf("mp4") >= 0 ? "mp4" : "webm";
       toast("Загружаю видео…");
-      const url = await uploadMedia(blob, ext, blob.type);
-      await sendRow({ kind: "video", media_url: url, body: caption, media_quality: quality });
+      const res = await storeBlob(blob, ext, blob.type, c, "");
+      await sendRow({ kind: "video", media_url: res.url, body: caption, media_quality: quality, media_name: res.meta });
       $("input").value = "";
       autosize();
     } catch (e) {
@@ -1486,12 +1501,12 @@
     const c = curChat();
     if (!c || !canPost(c)) return;
     try {
-      if (f.size > 20 * MB) throw new Error("Аудио больше 20 МБ");
+      if (f.size > 20 * MB - 4096) throw new Error("Аудио больше 20 МБ");
       toast("Загружаю аудио…");
       const ext = ((f.name.split(".").pop() || "mp3").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5)) || "mp3";
-      const url = await uploadMedia(f, ext, f.type);
       const title = f.name.replace(/\.[^.]+$/, "").slice(0, 200) || "Аудио";
-      await sendRow({ kind: "audio", media_url: url, body: caption, media_name: title });
+      const res = await storeBlob(f, ext, f.type, c, title);
+      await sendRow({ kind: "audio", media_url: res.url, body: caption, media_name: res.meta });
       $("input").value = "";
       autosize();
     } catch (e) {
@@ -1499,28 +1514,107 @@
     }
   }
 
+  function parseMeta(raw) {
+    try {
+      const o = JSON.parse(raw);
+      if (o && typeof o === "object") return o;
+    } catch (e) {
+      return { n: raw };
+    }
+    return { n: raw };
+  }
+
+  function extFor(t) {
+    const map = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "video/mp4": "mp4", "video/webm": "webm", "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/ogg": "ogg", "audio/wav": "wav", "audio/webm": "webm" };
+    return map[t] || "bin";
+  }
+
+  async function storeBlob(blob, ext, type, c, name) {
+    if (c.kind !== "direct") return { url: await uploadMedia(blob, ext, type), meta: name || null };
+    if (!E2E.priv) throw new Error("На этом устройстве нет ключа шифрования");
+    if (!(await chatKeyFor(c.otherId))) throw new Error("У собеседника ещё нет ключа шифрования");
+    const enc = await EchoE2E.encryptBytes(await blob.arrayBuffer());
+    const url = await uploadMedia(enc.data, "bin", "application/octet-stream");
+    return { url: url, meta: JSON.stringify({ n: name || "", k: enc.key, i: enc.iv, t: type || "application/octet-stream" }) };
+  }
+
+  async function decryptedBlob(m) {
+    const r = await fetch(m.media_url);
+    if (!r.ok) throw new Error("Не удалось скачать файл");
+    const plain = await EchoE2E.decryptBytes(await r.arrayBuffer(), m._pmeta.k, m._pmeta.i);
+    return new Blob([plain], { type: m._pmeta.t || "application/octet-stream" });
+  }
+
+  const MEDIA_URLS = new Map();
+  function mediaUrlOf(m) {
+    if (!m._pmeta) return Promise.resolve(m.media_url);
+    if (!MEDIA_URLS.has(m.media_url)) {
+      const p = decryptedBlob(m).then(function (b) { return URL.createObjectURL(b); }, function (e) {
+        MEDIA_URLS.delete(m.media_url);
+        throw e;
+      });
+      MEDIA_URLS.set(m.media_url, p);
+    }
+    return MEDIA_URLS.get(m.media_url);
+  }
+
+  function openMedia(m, kind) {
+    mediaUrlOf(m).then(function (u) { lightbox(u, kind); }, function (e) { toast(errMsg(e)); });
+  }
+
+  function mediaEl(m, tag, props) {
+    if (!m._pmeta) return h(tag, Object.assign({ src: m.media_url }, props));
+    const el = h(tag, props);
+    mediaUrlOf(m).then(function (u) { el.src = u; }, function () { el.classList.add("broken"); });
+    return el;
+  }
+
+  function lockNote() {
+    return h("div", { class: "gone", text: "🔒 Медиа недоступно на этом устройстве" });
+  }
+
+  function imgEl(m) {
+    if (m._plock) return lockNote();
+    const el = mediaEl(m, "img", { class: "media", alt: "фото", loading: "lazy" });
+    el.addEventListener("click", function () { openMedia(m, "image"); });
+    return el;
+  }
+
+  async function forwardPayload(m, c) {
+    if (!m.media_url) return { url: null, meta: null };
+    if (m._pmeta && c.kind !== "direct") {
+      const b = await decryptedBlob(m);
+      const url = await uploadMedia(b, extFor(m._pmeta.t), m._pmeta.t || "application/octet-stream");
+      return { url: url, meta: m._pname || null };
+    }
+    if (m._pmeta) return { url: m.media_url, meta: JSON.stringify(m._pmeta) };
+    return { url: m.media_url, meta: mediaName(m) || null };
+  }
+
   function videoCard(m) {
+    if (m._plock) return lockNote();
     const box = h("div", { class: "vcard", role: "button", tabindex: "0", "aria-label": "Смотреть видео" });
-    box.appendChild(h("video", { src: m.media_url, preload: "metadata", muted: true, playsinline: true }));
+    if (!m._pmeta) box.appendChild(h("video", { src: m.media_url, preload: "metadata", muted: true, playsinline: true }));
     box.appendChild(h("span", { class: "vplay", text: "Смотреть" }));
     if (m.media_quality) box.appendChild(h("span", { class: "vq", text: qualityLabel(m.media_quality) }));
     box.addEventListener("click", function (e) {
       e.stopPropagation();
-      lightbox(m.media_url);
+      openMedia(m, "video");
     });
     return box;
   }
 
   function audioCard(m) {
+    if (m._plock) return lockNote();
     return h("div", { class: "acard" },
       h("div", { class: "atitle", text: mediaName(m) || "Аудио" }),
-      h("audio", { src: m.media_url, controls: true, preload: "metadata" }));
+      mediaEl(m, "audio", { controls: true, preload: "metadata" }));
   }
 
-  function lightbox(url) {
+  function lightbox(url, kind) {
     const lb = $("lightbox");
     clear(lb);
-    lb.appendChild(isVideo(url) ? h("video", { src: url, controls: true, autoplay: true }) : h("img", { src: url, alt: "" }));
+    lb.appendChild(kind === "video" || (!kind && isVideo(url)) ? h("video", { src: url, controls: true, autoplay: true }) : h("img", { src: url, alt: "" }));
     lb.classList.remove("hidden");
   }
 

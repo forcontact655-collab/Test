@@ -50,5 +50,16 @@
     var pt = await subtle.decrypt({ name: "AES-GCM", iv: iv }, key, ct);
     return dec.decode(pt);
   }
-  root.EchoE2E = { generate: generate, deriveChatKey: deriveChatKey, encrypt: encrypt, decrypt: decrypt, isEncrypted: isEncrypted, PREFIX: PREFIX };
+  async function encryptBytes(buf) {
+    const key = await subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+    const iv = root.crypto.getRandomValues(new Uint8Array(12));
+    const ct = await subtle.encrypt({ name: "AES-GCM", iv: iv }, key, buf);
+    const raw = await subtle.exportKey("raw", key);
+    return { data: new Blob([ct], { type: "application/octet-stream" }), key: b64(raw), iv: b64(iv) };
+  }
+  async function decryptBytes(buf, keyB64, ivB64) {
+    const key = await subtle.importKey("raw", unb64(keyB64), { name: "AES-GCM" }, false, ["decrypt"]);
+    return subtle.decrypt({ name: "AES-GCM", iv: unb64(ivB64) }, key, buf);
+  }
+  root.EchoE2E = { generate: generate, deriveChatKey: deriveChatKey, encrypt: encrypt, decrypt: decrypt, isEncrypted: isEncrypted, encryptBytes: encryptBytes, decryptBytes: decryptBytes, PREFIX: PREFIX };
 })(typeof window !== "undefined" ? window : globalThis);
