@@ -156,7 +156,7 @@
   function uTag(p) { return p && p.username ? "@" + p.username : ""; }
   function googleLinked(u) { return !!u && (u.identities || []).some(function (i) { return i.provider === "google"; }); }
   function linkGoogle() {
-    sb.auth.linkIdentity({ provider: "google", options: { redirectTo: location.origin + location.pathname } }).then(function (r) {
+    sb.auth.linkIdentity({ provider: "google", options: { redirectTo: location.origin + location.pathname + location.search } }).then(function (r) {
       if (r.error) toast(errMsg(r.error));
     });
   }
@@ -267,7 +267,7 @@
     const btn = $("g-login");
     btn.disabled = true;
     try {
-      const r = await sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname } });
+      const r = await sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname + location.search } });
       if (r.error) throw r.error;
     } catch (err) {
       toast(errMsg(err));
@@ -305,6 +305,7 @@
     await e2eInit();
     await Promise.all([loadChats(), loadPacks()]);
     flushOutbox();
+    openFromUrl();
     connectRealtime();
     heartbeat();
     setInterval(heartbeat, 120000);
@@ -669,6 +670,48 @@
     return out;
   }
 
+  function cleanUser(q) { return String(q || "").trim().replace(/^@/, "").toLowerCase(); }
+  async function findExact(q) {
+    const s = cleanUser(q);
+    if (!s) return null;
+    const r = /^\d{1,12}$/.test(s)
+      ? await sb.from("profiles").select("*").eq("uid", s).maybeSingle()
+      : await sb.from("profiles").select("*").eq("username", s).maybeSingle();
+    if (r.error || !r.data) return null;
+    S.profiles.set(r.data.id, Object.assign({}, S.profiles.get(r.data.id) || {}, r.data));
+    return r.data;
+  }
+  async function openProfileByQuery(q) {
+    const p = await findExact(q);
+    if (!p) return toast("Такой пользователь не найден");
+    openProfilePage(p.id);
+  }
+  function profileLink(p) {
+    return location.origin + location.pathname + "?" + (p.username ? "u=" + encodeURIComponent(p.username) : "id=" + p.uid);
+  }
+  function copyProfileLink(p) { copyText(profileLink(p)); }
+  function openFromUrl() {
+    const qs = new URLSearchParams(location.search);
+    const q = qs.get("u") || qs.get("id");
+    if (!q) return;
+    history.replaceState(null, "", location.pathname);
+    openProfileByQuery(q);
+  }
+  function mentionNodes(text) {
+    const out = [];
+    const re = /@([a-zA-Z0-9_]{3,32})/g;
+    let last = 0;
+    let m;
+    while ((m = re.exec(text))) {
+      if (m.index > last) out.push(text.slice(last, m.index));
+      const uname = m[1].toLowerCase();
+      out.push(h("a", { class: "mention", href: "#", onclick: function (e) { e.preventDefault(); e.stopPropagation(); openProfileByQuery(uname); } }, m[0]));
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) out.push(text.slice(last));
+    return out;
+  }
+
   let remoteTimer = null;
   function onSearchInput() {
     S.query = $("search").value;
@@ -852,7 +895,7 @@
           ? h("video", { class: "sticker-img", src: m.media_url, autoplay: true, loop: true, muted: true, playsinline: true })
           : h("img", { class: "sticker-img", src: m.media_url, alt: "стикер", loading: "lazy" }));
       }
-      if (shown(m)) b.appendChild(h("div", { class: "text", text: shown(m) }));
+      if (shown(m)) b.appendChild(h("div", { class: "text" }, ...mentionNodes(shown(m))));
     }
     const readAll = me && !deleted && readByAll(m, c);
     const meta = h("div", { class: "meta" },
@@ -1938,8 +1981,10 @@
     const acts = own
       ? [actBtn("Выбрать фото", ICON.camera, function () { pickFile("image/*,video/mp4,video/webm", changeAvatar); }),
          actBtn("Изменить", ICON.edit, myEditSheet),
-         actBtn("Настройки", ICON.gear, openSettingsPage)]
+         actBtn("Настройки", ICON.gear, openSettingsPage),
+         actBtn("Ссылка", ICON.copy, function () { copyProfileLink(p); })]
       : [actBtn("Написать", ICON.msg, function () { openDirect(p.id); }),
+         actBtn("Ссылка", ICON.copy, function () { copyProfileLink(p); }),
          actBtn("Скопировать ID", ICON.copy, function () { copyText(String(p.uid)); })];
     over.appendChild(h("div", { class: "pp-acts" }, acts));
     if (p.music_url) body.appendChild(musicCard(p));
@@ -2349,13 +2394,14 @@
           pName(p) + (mem.user_id === S.me.id ? " (вы)" : ""), roleText, function () { openProfilePage(p.id); }));
       });
       if (isAdmin) {
-        const add = h("input", { type: "text", placeholder: "Добавить по username" });
+        const add = h("input", { type: "text", placeholder: "Добавить по username или ID" });
         b.appendChild(add);
         b.appendChild(h("div", { class: "btn-row" }, btnGhost("Добавить участника", async function () {
-          const u = add.value.trim().toLowerCase();
+          const u = cleanUser(add.value);
           if (!u) return;
-          const r = await sb.from("profiles").select("*").eq("username", u).maybeSingle();
-          if (r.error || !r.data) return toast("Такой пользователь не найден");
+          const found = await findExact(u);
+          if (!found) return toast("Такой пользователь не найден");
+          const r = { data: found };
           const a = await sb.rpc("add_chat_member", { p_chat: c.id, p_user: r.data.id });
           if (a.error) return toast(errMsg(a.error));
           S.profiles.set(r.data.id, r.data);
