@@ -686,10 +686,6 @@
     if (!p) return toast("Такой пользователь не найден");
     openProfilePage(p.id);
   }
-  function profileLink(p) {
-    return location.origin + location.pathname + "?" + (p.username ? "u=" + encodeURIComponent(p.username) : "id=" + p.uid);
-  }
-  function copyProfileLink(p) { copyText(profileLink(p)); }
   function openFromUrl() {
     const qs = new URLSearchParams(location.search);
     const q = qs.get("u") || qs.get("id");
@@ -1981,10 +1977,8 @@
     const acts = own
       ? [actBtn("Выбрать фото", ICON.camera, function () { pickFile("image/*,video/mp4,video/webm", changeAvatar); }),
          actBtn("Изменить", ICON.edit, myEditSheet),
-         actBtn("Настройки", ICON.gear, openSettingsPage),
-         actBtn("Ссылка", ICON.copy, function () { copyProfileLink(p); })]
+         actBtn("Настройки", ICON.gear, openSettingsPage)]
       : [actBtn("Написать", ICON.msg, function () { openDirect(p.id); }),
-         actBtn("Ссылка", ICON.copy, function () { copyProfileLink(p); }),
          actBtn("Скопировать ID", ICON.copy, function () { copyText(String(p.uid)); })];
     over.appendChild(h("div", { class: "pp-acts" }, acts));
     if (p.music_url) body.appendChild(musicCard(p));
