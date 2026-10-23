@@ -23,7 +23,7 @@
   ];
   const NAME_COLORS = ["#c4b5fd", "#f0abfc", "#a5f3fc", "#fde68a", "#86efac", "#fda4af"];
   const MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
-  const FOLDERS = [["all", "Все"], ["direct", "Личные"], ["group", "Группы"], ["channel", "Каналы"], ["unread", "Непрочитанные"]];
+  const FOLDERS = [["all", "Все"], ["direct", "Личные"], ["group", "Группы"], ["channel", "Каналы"], ["unread", "Непрочитанные"], ["archived", "Архив"]];
   const ICON = {
     imgs: "M3 5h18v14H3zM3 16l5-5 4 4 3-3 6 6M15 9.5a1.5 1.5 0 1 0 0-.01",
     music: "M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
@@ -68,7 +68,7 @@
     folder: "all", query: "", remote: { people: [], messages: [] }, remoteDone: false,
     open: null, messages: [], loadedChat: null, editing: null, replyTo: null, jumpMsg: null,
     typingCh: null, presCh: null, dbCh: null, installEvt: null, lastLong: 0, refreshT: null,
-    seen: new Map(), chatsReady: false, pendingOpen: null
+    seen: new Map(), chatsReady: false, pendingOpen: null, drafts: new Map()
   };
   const typingMap = new Map();
   const E2E = { priv: null, missing: false, keys: new Map(), plain: new Map() };
@@ -132,6 +132,7 @@
     if (/over_email_send_rate_limit|rate limit|too many|for security purposes/i.test(m)) return "Слишком часто. Подожди немного и попробуй снова";
     if (/otp_expired|expired|invalid.*(otp|token)|token.*invalid/i.test(m)) return "Код неверный или устарел. Запроси новый";
     if (/already registered|already been registered|User already|занят/i.test(m)) return "Такой username уже занят";
+    if (/dm_closed/i.test(m)) return "Этот человек закрыл новые личные чаты. Написать можно, если переписка уже есть";
     if (/edit window/i.test(m)) return "Редактировать можно только 48 часов";
     if (/row-level security|not allowed|permission/i.test(m)) return "Нет доступа";
     if (/duplicate key/i.test(m)) return "Уже добавлено";
@@ -178,6 +179,7 @@
     const d = new Date(iso);
     return pad2(d.getDate()) + "." + pad2(d.getMonth() + 1);
   }
+  function lastSeenText(p) { return p && p.last_seen ? "был(а) " + agoText(p.last_seen) : "статус скрыт"; }
   function agoText(iso) {
     if (!iso) return "давно";
     const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -242,6 +244,9 @@
     });
   }
   function matchFolder(c) {
+    // В «Все» архивные чаты скрыты, но при поиске ищем и в них.
+    if (S.folder === "archived") return !!c.archived;
+    if (c.archived) return false;
     if (S.folder === "all") return true;
     if (S.folder === "direct") return c.kind === "direct";
     if (S.folder === "group") return c.kind === "group";
@@ -300,6 +305,7 @@
     $("app").classList.remove("hidden");
     hideBoot();
     renderMeBtn();
+    await loadDrafts();
     await showCachedChats();
     await e2eInit();
     await Promise.all([loadChats(), loadPacks()]);
@@ -324,7 +330,7 @@
 
   function heartbeat() {
     if (!S.me || document.hidden) return;
-    sb.from("profiles").update({ last_seen: new Date().toISOString() }).eq("id", S.me.id).then(function () {}, function () {});
+    sb.rpc("touch_presence").then(function () {}, function () {});
   }
 
   function renderMeBtn() {
@@ -341,7 +347,7 @@
   async function loadChats() {
     if (!navigator.onLine) return loadCachedChats();
     const me = S.me.id;
-    const mem = await sb.from("chat_members").select("chat_id, role, pinned, muted, last_read_at, chats(id, kind, title, description, avatar_url, avatar_animated, created_by)").eq("user_id", me);
+    const mem = await sb.from("chat_members").select("chat_id, role, pinned, muted, archived, last_read_at, chats(id, kind, title, description, avatar_url, avatar_animated, created_by)").eq("user_id", me);
     if (mem.error) return isNetErr(mem.error) ? loadCachedChats() : toast(errMsg(mem.error));
     const mine = (mem.data || []).filter(function (r) { return r.chats; });
     const ids = mine.map(function (r) { return r.chat_id; });
@@ -368,7 +374,7 @@
       return {
         id: c.id, kind: c.kind, title: c.title || "", description: c.description || "",
         avatar_url: c.avatar_url, avatar_animated: c.avatar_animated, created_by: c.created_by,
-        role: r.role, pinned: r.pinned, muted: r.muted, members: members, otherId: otherId,
+        role: r.role, pinned: r.pinned, muted: r.muted, archived: !!r.archived, members: members, otherId: otherId,
         unread: Number(s.unread || 0), lastAt: s.last_at || null,
         last: s.last_kind ? { kind: s.last_kind, body: s.last_body || "", sender: s.last_sender, deleted: !!s.last_deleted } : null
       };
@@ -410,7 +416,9 @@
     const box = $("tabs");
     clear(box);
     const unread = S.chats.filter(function (c) { return c.unread > 0; }).length;
+    const hasArchive = S.chats.some(function (c) { return c.archived; });
     FOLDERS.forEach(function (f) {
+      if (f[0] === "archived" && !hasArchive) return;
       const label = f[0] === "unread" && unread ? f[1] + " · " + unread : f[1];
       box.appendChild(h("button", {
         class: "tab" + (S.folder === f[0] ? " on" : ""), type: "button", text: label,
@@ -430,6 +438,24 @@
   }
   function cacheGet(k) { return window.EchoStore ? EchoStore.get(k).catch(function () { return null; }) : Promise.resolve(null); }
   function cacheSet(k, v) { if (window.EchoStore) EchoStore.set(k, JSON.parse(JSON.stringify(v))).catch(function () {}); }
+  // Черновики хранятся на устройстве по каждому чату (IndexedDB), привязаны к пользователю.
+  let draftT = null;
+  async function loadDrafts() {
+    const d = await cacheGet("drafts");
+    if (!d || d.uid !== S.me.id || !d.map) return;
+    Object.keys(d.map).forEach(function (k) { S.drafts.set(k, d.map[k]); });
+  }
+  function persistDrafts() {
+    const map = {};
+    S.drafts.forEach(function (v, k) { map[k] = v; });
+    cacheSet("drafts", { uid: S.me.id, map: map });
+  }
+  function setDraft(chatId, v) {
+    if (!chatId || !S.me) return;
+    if (v && v.trim()) S.drafts.set(chatId, v); else S.drafts.delete(chatId);
+    clearTimeout(draftT);
+    draftT = setTimeout(persistDrafts, 400);
+  }
   function cacheChats() {
     setOffline(false);
     cacheSet("chats", { uid: S.me.id, chats: S.chats, profiles: Array.from(S.profiles.values()) });
@@ -638,7 +664,10 @@
 
   function chatItem(c) {
     const typing = typingIn(c.id);
-    const pv = h("span", { class: "pv" + (typing ? " typing" : ""), text: typing ? "печатает…" : previewLine(c) });
+    const draft = S.open !== c.id ? S.drafts.get(c.id) : null;
+    const pv = draft && !typing
+      ? h("span", { class: "pv draft" }, h("b", { text: "Черновик: " }), draft.replace(/\s+/g, " ").slice(0, 120))
+      : h("span", { class: "pv" + (typing ? " typing" : ""), text: typing ? "печатает…" : previewLine(c) });
     // Список перерисовывается целиком при каждом обновлении. Анимацию появления
     // проигрываем только для чатов, которых раньше не было на экране, и для бейджа,
     // у которого выросло число непрочитанных. Иначе всё мигало бы при каждой перерисовке.
@@ -693,7 +722,7 @@
     clear(list);
     const q = clean(S.query).toLowerCase();
     const items = sortedChats().filter(function (c) {
-      return matchFolder(c) && (!q || chatTitle(c).toLowerCase().indexOf(q) >= 0);
+      return (q ? true : matchFolder(c)) && (!q || chatTitle(c).toLowerCase().indexOf(q) >= 0);
     });
     if (!q) {
       // Пока чаты не загружены (ни из кэша, ни с сети), не пишем «Чатов пока нет»:
@@ -811,7 +840,7 @@
       const p = profileOf(c);
       if (!p) return "";
       if (isOn(p.id)) return "в сети";
-      return "был(а) " + agoText(p.last_seen);
+      return lastSeenText(p);
     }
     if (c.kind === "group") return c.members.length + " участников";
     return "канал · " + c.members.length + " подписчиков";
@@ -840,7 +869,9 @@
       S.replyTo = null;
       closePanel();
     }
+    const switched = S.open !== id;
     S.open = id;
+    if (switched) { $("input").value = S.drafts.get(id) || ""; autosize(); }
     clearNativeNotifs(id);
     S.jumpMsg = jumpMsg || null;
     hideCtx();
@@ -1041,7 +1072,7 @@
     if (S.editing) {
       box.appendChild(bar("Редактирование", shown(S.editing), function () {
         S.editing = null;
-        $("input").value = "";
+        $("input").value = S.drafts.get(S.open) || "";
         autosize();
         renderBars();
       }));
@@ -1099,9 +1130,11 @@
     sending = true;
     $("send-btn").disabled = true;
     try {
+      const wasEdit = !!S.editing;
       if (S.editing) await saveEdit(S.editing, text);
       else await sendRow({ kind: "text", body: text });
-      ta.value = "";
+      if (wasEdit) ta.value = S.drafts.get(c.id) || "";
+      else { ta.value = ""; setDraft(c.id, ""); }
       autosize();
     } catch (err) {
       toast(errMsg(err));
@@ -1310,6 +1343,7 @@
     const items = [
       mi(c.pinned ? "Открепить" : "Закрепить", ICON.pin, function () { togglePin(c); }),
       mi(c.muted ? "Включить звук" : "Выключить звук", c.muted ? ICON.unmute : ICON.mute, function () { toggleMute(c); }),
+      mi(c.archived ? "Вернуть из архива" : "В архив", ICON.pin, function () { toggleArchive(c); }),
       mi("Информация", ICON.info, function () { chatInfo(c); })
     ];
     if (c.kind === "direct") {
@@ -1334,6 +1368,14 @@
     const r = await sb.from("chat_members").update({ pinned: v }).eq("chat_id", c.id).eq("user_id", S.me.id);
     if (r.error) return toast(errMsg(r.error));
     c.pinned = v;
+    renderSidebar();
+  }
+  async function toggleArchive(c) {
+    const v = !c.archived;
+    const r = await sb.from("chat_members").update({ archived: v }).eq("chat_id", c.id).eq("user_id", S.me.id);
+    if (r.error) return toast(errMsg(r.error));
+    c.archived = v;
+    if (v && S.folder === "archived" && !S.chats.some(function (x) { return x.archived; })) S.folder = "all";
     renderSidebar();
   }
   async function toggleMute(c) {
@@ -2034,7 +2076,7 @@
     over.replaceChildren();
     over.appendChild(h("div", { class: "pp-name", text: pName(p) }));
     if (p.username) over.appendChild(h("div", { class: "pp-user", text: "@" + p.username }));
-    over.appendChild(h("div", { class: "pp-seen" + (online ? " on" : ""), text: online ? "в сети" : "был(а) " + agoText(p.last_seen) }));
+    over.appendChild(h("div", { class: "pp-seen" + (online ? " on" : ""), text: online ? "в сети" : lastSeenText(p) }));
     const st = statusNode(p);
     if (st) over.appendChild(st);
     const acts = own
@@ -2049,7 +2091,7 @@
     if (p.bio) info.appendChild(pRow("О себе", p.bio));
     info.appendChild(pRow("Имя пользователя", p.username ? "@" + p.username : "не задан"));
     info.appendChild(pRow("ID", String(p.uid || "—")));
-    info.appendChild(pRow("Статус", online ? "в сети" : "был(а) " + agoText(p.last_seen)));
+    info.appendChild(pRow("Статус", online ? "в сети" : lastSeenText(p)));
     body.appendChild(info);
     syncMusic();
   }
@@ -2149,6 +2191,43 @@
     e.prompt();
     renderSettingsPage();
   }
+  function logoutOthersConfirm() {
+    confirmDlg("Выйти на других устройствах?", "Echo на остальных телефонах и в браузерах попросит войти заново. Этот телефон останется в аккаунте.", "Выйти", async function () {
+      const r = await sb.auth.signOut({ scope: "others" });
+      if (r && r.error) return toast(errMsg(r.error));
+      toast("Готово");
+    });
+  }
+  function privacySummary(p) {
+    return (p.hide_last_seen ? "статус скрыт" : "статус виден") + ", новые чаты " + (p.dm_closed ? "закрыты" : "открыты");
+  }
+  function choiceRow(title, sub, active, fn) {
+    return rowBtn(h("span", { class: "sp-ico", style: { background: active ? "#22c55e" : "rgba(167,139,250,.14)" } }, active ? "✓" : ""), title, sub, fn);
+  }
+  function privacySheet() {
+    openSheet("Приватность", function (b) {
+      const p = S.profile;
+      b.appendChild(h("div", { class: "ttl", text: "Кто видит, что я в сети" }));
+      b.appendChild(choiceRow("Все", "видят «в сети» и время последнего визита", !p.hide_last_seen, function () { setPrivacy({ hide_last_seen: false }); }));
+      b.appendChild(choiceRow("Никто", "статус и время последнего визита скрыты", !!p.hide_last_seen, function () { setPrivacy({ hide_last_seen: true }); }));
+      b.appendChild(h("div", { class: "ttl", text: "Новые личные чаты" }));
+      b.appendChild(choiceRow("Разрешены", "любой может написать тебе первым", !p.dm_closed, function () { setPrivacy({ dm_closed: false }); }));
+      b.appendChild(choiceRow("Закрыты", "писать можно только тем, с кем уже есть переписка", !!p.dm_closed, function () { setPrivacy({ dm_closed: true }); }));
+    });
+  }
+  async function setPrivacy(patch) {
+    const p = S.profile;
+    const hide = patch.hide_last_seen !== undefined ? patch.hide_last_seen : !!p.hide_last_seen;
+    const dm = patch.dm_closed !== undefined ? patch.dm_closed : !!p.dm_closed;
+    const r = await sb.rpc("set_privacy", { p_hide_last_seen: hide, p_dm_closed: dm });
+    if (r.error) return toast(errMsg(r.error));
+    applySelf(r.data);
+    if (S.presCh) {
+      try { if (hide) await S.presCh.untrack(); else await S.presCh.track({ at: Date.now() }); } catch (e) {}
+    }
+    renderSettingsPage();
+    privacySheet();
+  }
   function logoutConfirm() {
     confirmDlg("Выйти?", "Сессия на этом устройстве завершится.", "Выйти", async function () {
       await sb.auth.signOut();
@@ -2170,6 +2249,9 @@
       rowBtn(rowIco(ICON.hash, "#0ea5e9"), "Мой ID", String(p.uid || "—"), function () { copyText(String(p.uid)); }),
       rowBtn(rowIco(ICON.lock, "#10b981"), "Шифрование личных чатов", E2E.priv ? "включено, ключ на этом устройстве" : "ключ недоступен на этом устройстве", function () { e2eSheet(); })
     ]));
+    body.appendChild(spGroup([
+      rowBtn(rowIco(ICON.lock, "#64748b"), "Приватность", privacySummary(p), privacySheet)
+    ]));
     const notifRows = [
       rowBtn(rowIco(ICON.sticker, "#f97316"), "Стикеры", "паки, свои картинки и GIF", function () { stickerSheet(); }),
       rowBtn(rowIco(ICON.bell, "#ef4444"), "Уведомления", "браузерные, когда приложение свёрнуто", notifyPermission)
@@ -2181,7 +2263,8 @@
       rowBtn(rowIco(ICON.globe, "#8b5cf6"), "Язык", "Русский", function () { toast("Пока только русский"); })
     ]));
     body.appendChild(spGroup([
-      rowBtn(rowIco(ICON.exit, "#ef4444"), "Выйти", "из этого аккаунта на устройстве", logoutConfirm, true)
+      rowBtn(rowIco(ICON.exit, "#ef4444"), "Выйти", "из этого аккаунта на устройстве", logoutConfirm, true),
+      rowBtn(rowIco(ICON.exit, "#f59e0b"), "Выйти на других устройствах", "остальные телефоны и браузеры", logoutOthersConfirm)
     ]));
   }
   function profileStyleSheet() {
@@ -2593,7 +2676,7 @@
       renderSidebar();
       renderHeader();
     }).subscribe(async function (status) {
-      if (status === "SUBSCRIBED") await S.presCh.track({ at: Date.now() });
+      if (status === "SUBSCRIBED" && !S.profile.hide_last_seen) await S.presCh.track({ at: Date.now() });
     });
 
     S.dbCh = sb.channel("gg-db")
@@ -2772,7 +2855,11 @@
     $("smile-btn").addEventListener("click", function () { togglePanel("smiles"); });
     $("attach-btn").addEventListener("click", attachMenu);
     $("composer").addEventListener("submit", function (e) { e.preventDefault(); submitText(); });
-    $("input").addEventListener("input", function () { autosize(); throttleTyping(); });
+    $("input").addEventListener("input", function () {
+      autosize();
+      throttleTyping();
+      if (S.open && !S.editing) setDraft(S.open, $("input").value);
+    });
     $("input").addEventListener("keydown", function (e) {
       if (e.key === "Enter" && !e.shiftKey && !isTouch) {
         e.preventDefault();
