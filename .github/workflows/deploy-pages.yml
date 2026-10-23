@@ -200,6 +200,14 @@ jobs:
           grep -n "version" "$gradle_file" || true
           npx cap sync android
 
+      - name: Register app auth scheme
+        working-directory: ${{ runner.temp }}/echo
+        run: |
+          f=android/app/src/main/AndroidManifest.xml
+          sed -i '0,/<\/activity>/s//<intent-filter><action android:name="android.intent.action.VIEW" \/><category android:name="android.intent.category.DEFAULT" \/><category android:name="android.intent.category.BROWSABLE" \/><data android:scheme="com.forcontact655.echo" \/><\/intent-filter><\/activity>/' "$f"
+          grep -q 'android:scheme="com.forcontact655.echo"' "$f"
+          grep -n "scheme" "$f"
+
       - name: Generate launcher icons
         run: |
           if ! command -v convert > /dev/null; then
