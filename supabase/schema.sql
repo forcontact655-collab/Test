@@ -12,7 +12,9 @@ create table public.profiles (
   music_url text,
   music_title text not null default '' check (char_length(music_title) <= 80),
   public_key text check (public_key is null or char_length(public_key) <= 200),
-  last_seen timestamptz not null default now(),
+  last_seen timestamptz default now(), -- пишет только touch_presence(); null, если скрыт
+  hide_last_seen boolean not null default false,
+  dm_closed boolean not null default false, -- true: новые личные чаты только с теми, кто уже пишет
   created_at timestamptz not null default now()
 );
 
@@ -34,6 +36,7 @@ create table public.chat_members (
   role text not null default 'member' check (role in ('owner','admin','member')),
   pinned boolean not null default false,
   muted boolean not null default false,
+  archived boolean not null default false,
   last_read_at timestamptz not null default now(),
   joined_at timestamptz not null default now(),
   primary key (chat_id, user_id)
@@ -154,6 +157,9 @@ begin
   k := a::text || ':' || b::text;
   select id into cid from public.chats where direct_key = k;
   if cid is null then
+    if exists (select 1 from public.profiles where id = other and dm_closed) then
+      raise exception 'dm_closed';
+    end if;
     insert into public.chats (kind, direct_key, created_by) values ('direct', k, me) returning id into cid;
     insert into public.chat_members (chat_id, user_id, role) values (cid, me, 'member'), (cid, other, 'member');
   else
@@ -382,3 +388,29 @@ drop policy if exists user_keys_own on public.user_keys;
 create policy user_keys_own on public.user_keys for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
 revoke all on public.user_keys from anon, authenticated;
 grant select, insert, update, delete on public.user_keys to authenticated;
+
+-- Приватность и архив (миграция privacy_and_archive)
+revoke update (last_seen) on public.profiles from authenticated;
+
+create or replace function public.touch_presence() returns void
+language sql security definer set search_path = public as $$
+  update public.profiles set last_seen = case when hide_last_seen then null else now() end where id = auth.uid();
+$$;
+revoke all on function public.touch_presence() from public, anon;
+grant execute on function public.touch_presence() to authenticated;
+
+create or replace function public.set_privacy(p_hide_last_seen boolean, p_dm_closed boolean) returns public.profiles
+language plpgsql security definer set search_path = public as $$
+declare r public.profiles;
+begin
+  if auth.uid() is null then raise exception 'not authenticated'; end if;
+  update public.profiles
+     set hide_last_seen = p_hide_last_seen,
+         dm_closed = p_dm_closed,
+         last_seen = case when p_hide_last_seen then null else coalesce(last_seen, now()) end
+   where id = auth.uid()
+  returning * into r;
+  return r;
+end $$;
+revoke all on function public.set_privacy(boolean, boolean) from public, anon;
+grant execute on function public.set_privacy(boolean, boolean) to authenticated;

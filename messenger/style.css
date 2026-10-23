@@ -425,3 +425,5 @@ img,video{display:block}
 .auth-or::before,.auth-or::after{content:"";flex:1;height:1px;background:var(--line)}
 
 .mention{color:#a78bfa;font-weight:600;text-decoration:none;cursor:pointer}
+
+.pv.draft b{color:#f9a8d4;font-weight:600}
