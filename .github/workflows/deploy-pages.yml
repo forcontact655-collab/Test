@@ -147,8 +147,138 @@ jobs:
             --prerelease \
             --target "$GITHUB_SHA"
 
+  echo-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Collect web files
+        run: |
+          mkdir -p "$RUNNER_TEMP/echo/www/vendor"
+          cp messenger/index.html messenger/style.css messenger/app.js messenger/manifest.webmanifest messenger/icon.png "$RUNNER_TEMP/echo/www/"
+          cp messenger/vendor/supabase.js "$RUNNER_TEMP/echo/www/vendor/"
+          cat > "$RUNNER_TEMP/echo/capacitor.config.json" <<'EOF'
+          {
+            "appId": "com.forcontact655.echo",
+            "appName": "Echo",
+            "webDir": "www"
+          }
+          EOF
+
+      - name: Install Capacitor
+        working-directory: ${{ runner.temp }}/echo
+        run: |
+          npm init -y > /dev/null
+          npm install @capacitor/core@8.5.3 @capacitor/cli@8.5.3 @capacitor/android@8.5.3 @capacitor/app@8.1.2
+
+      - name: Generate Android project
+        working-directory: ${{ runner.temp }}/echo
+        run: |
+          npx cap add android
+          gradle_file=android/app/build.gradle
+          sed -i -E "s/versionCode [0-9]+/versionCode ${GITHUB_RUN_NUMBER}/" "$gradle_file"
+          sed -i -E "s/versionName \"[^\"]*\"/versionName \"1.0.${GITHUB_RUN_NUMBER}\"/" "$gradle_file"
+          grep -q "versionCode ${GITHUB_RUN_NUMBER}" "$gradle_file"
+          grep -q "versionName \"1.0.${GITHUB_RUN_NUMBER}\"" "$gradle_file"
+          npx cap sync android
+
+      - name: Generate launcher icons
+        run: |
+          if ! command -v convert > /dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq imagemagick
+          fi
+          convert -version | head -1
+          src="$GITHUB_WORKSPACE/messenger/icon.png"
+          res="$RUNNER_TEMP/echo/android/app/src/main/res"
+          for pair in mdpi:48:108 hdpi:72:162 xhdpi:96:216 xxhdpi:144:324 xxxhdpi:192:432; do
+            d=${pair%%:*}
+            rest=${pair#*:}
+            l=${rest%%:*}
+            f=${rest#*:}
+            dir="$res/mipmap-$d"
+            mkdir -p "$dir"
+            rm -f "$dir"/ic_launcher*.webp
+            convert "$src" -resize "${l}x${l}" "$dir/ic_launcher.png"
+            cp "$dir/ic_launcher.png" "$dir/ic_launcher_round.png"
+            convert "$src" -resize "${f}x${f}" "$dir/ic_launcher_foreground.png"
+          done
+
+      - name: Build debug APK
+        working-directory: ${{ runner.temp }}/echo/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Sign APK with stable key
+        if: env.KEYSTORE_B64 != ''
+        working-directory: ${{ runner.temp }}/echo
+        run: |
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.p12"
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          apk=android/app/build/outputs/apk/debug/app-debug.apk
+          "$bt/apksigner" sign --ks "$RUNNER_TEMP/release.p12" --ks-type PKCS12 --ks-pass env:KEYSTORE_PASS --out "$RUNNER_TEMP/signed.apk" "$apk"
+          mv "$RUNNER_TEMP/signed.apk" "$apk"
+          rm -f "$RUNNER_TEMP/release.p12"
+
+      - name: Check APK contents
+        working-directory: ${{ runner.temp }}/echo
+        run: |
+          apk=android/app/build/outputs/apk/debug/app-debug.apk
+          unzip -l "$apk" > apk-list.txt
+          grep -q 'assets/public/index.html' apk-list.txt
+          grep -q 'assets/public/app.js' apk-list.txt
+          grep -q 'assets/public/style.css' apk-list.txt
+          grep -q 'assets/public/vendor/supabase.js' apk-list.txt
+          if grep -qi '\.pez' apk-list.txt; then exit 1; fi
+          if grep -q 'mine.jpg' apk-list.txt; then exit 1; fi
+          grep -q 'META-INF/' apk-list.txt
+          ls -la "$apk"
+
+      - name: Prepare APK file
+        run: |
+          mkdir -p "$RUNNER_TEMP/out-echo"
+          cp "$RUNNER_TEMP/echo/android/app/build/outputs/apk/debug/app-debug.apk" "$RUNNER_TEMP/out-echo/echo.apk"
+          printf '{"versionName":"1.0.%s","versionCode":%s,"commit":"%s","built":"%s"}\n' "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_NUMBER" "${GITHUB_SHA:0:7}" "$(date -u +%Y-%m-%d)" > "$RUNNER_TEMP/out-echo/version.json"
+          cat "$RUNNER_TEMP/out-echo/version.json"
+
+      - name: Upload Echo APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: echo-debug
+          path: ${{ runner.temp }}/out-echo
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish Echo APK release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete echo-latest --cleanup-tag --yes || true
+          gh release create echo-latest "$RUNNER_TEMP/out-echo/echo.apk" \
+            --title "Echo APK (latest build)" \
+            --notes "Сборка из коммита ${GITHUB_SHA:0:7} (${GITHUB_REF_NAME}). Обновляется при каждом пуше в ветки arena." \
+            --prerelease \
+            --target "$GITHUB_SHA"
+
   deploy:
-    needs: apk
+    needs: [apk, echo-apk]
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -163,6 +293,12 @@ jobs:
           name: gem-mine-debug
           path: download
 
+      - name: Download Echo APK
+        uses: actions/download-artifact@v4
+        with:
+          name: echo-debug
+          path: echo-dl
+
       - name: Assemble site
         run: |
           mkdir -p site/assets
@@ -171,6 +307,9 @@ jobs:
           cp assets/icon.png site/assets/
           cp -r download site/download
           cp -r messenger site/messenger
+          mkdir -p site/echo
+          cp -r echo-site/. site/echo/
+          cp echo-dl/echo.apk echo-dl/version.json site/echo/
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

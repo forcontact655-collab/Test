@@ -1,4 +1,4 @@
-const CACHE = "gemgram-v2";
+const CACHE = "echo-v3";
 const SHELL = ["./", "index.html", "style.css", "app.js", "vendor/supabase.js", "manifest.webmanifest", "icon.png"];
 
 self.addEventListener("install", function (e) {

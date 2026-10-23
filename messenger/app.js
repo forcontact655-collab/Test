@@ -1582,7 +1582,7 @@
         toast(perm === "granted" ? "Уведомления включены" : "Уведомления не разрешены");
       }));
       if (S.installEvt) {
-        b.appendChild(rowBtn(icoBox(ICON.install), "Установить приложение", "добавить Gemgram на экран", async function () {
+        b.appendChild(rowBtn(icoBox(ICON.install), "Установить приложение", "добавить Echo на экран", async function () {
           const e = S.installEvt;
           S.installEvt = null;
           closeSheet();
@@ -1630,7 +1630,7 @@
     const sender = pName(S.profiles.get(m.sender_id));
     const body = (c && c.kind !== "direct" ? sender + ": " : "") + (m.body || "Вложение");
     try {
-      new Notification(c ? chatTitle(c) : "Gemgram", { body: body, tag: m.chat_id, icon: "icon.png" });
+      new Notification(c ? chatTitle(c) : "Echo", { body: body, tag: m.chat_id, icon: "icon.png" });
     } catch (e) {}
   }
 
@@ -1766,8 +1766,23 @@
       e.preventDefault();
       S.installEvt = e;
     });
-    if ("serviceWorker" in navigator) {
+    if ("serviceWorker" in navigator && !window.Capacitor) {
       navigator.serviceWorker.register("sw.js").catch(function () {});
+    }
+    const CapApp = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+    if (CapApp) {
+      CapApp.addListener("backButton", function () {
+        if (!$("ctx").classList.contains("hidden")) return hideCtx();
+        if (!$("sheet").classList.contains("hidden")) return closeSheet();
+        if (!$("lightbox").classList.contains("hidden")) {
+          $("lightbox").classList.add("hidden");
+          clear($("lightbox"));
+          return;
+        }
+        if (panelMode) return closePanel();
+        if (S.open) return closeChat();
+        CapApp.exitApp();
+      });
     }
   }
 
