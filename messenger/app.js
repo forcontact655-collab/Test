@@ -68,7 +68,7 @@
     folder: "all", query: "", remote: { people: [], messages: [] }, remoteDone: false,
     open: null, messages: [], loadedChat: null, editing: null, replyTo: null, jumpMsg: null,
     typingCh: null, presCh: null, dbCh: null, installEvt: null, lastLong: 0, refreshT: null,
-    seen: new Map(), chatsReady: false
+    seen: new Map(), chatsReady: false, pendingOpen: null
   };
   const typingMap = new Map();
   const E2E = { priv: null, missing: false, keys: new Map(), plain: new Map() };
@@ -303,6 +303,7 @@
     await showCachedChats();
     await e2eInit();
     await Promise.all([loadChats(), loadPacks()]);
+    tryPendingOpen();
     flushOutbox();
     openFromUrl();
     connectRealtime();
@@ -840,6 +841,7 @@
       closePanel();
     }
     S.open = id;
+    clearNativeNotifs(id);
     S.jumpMsg = jumpMsg || null;
     hideCtx();
     $("app").classList.add("chat-open");
@@ -2130,6 +2132,13 @@
     return g;
   }
   async function notifyPermission() {
+    const LN = nativeNotifier();
+    if (LN) {
+      try {
+        const ok = await nativeNotifyPermission(LN);
+        return toast(ok ? "Уведомления включены" : "Уведомления не разрешены");
+      } catch (e) { return toast("Не получилось включить уведомления"); }
+    }
     if (!("Notification" in window)) return toast("Браузер не поддерживает уведомления");
     const perm = await Notification.requestPermission();
     toast(perm === "granted" ? "Уведомления включены" : "Уведомления не разрешены");
@@ -2596,15 +2605,66 @@
       .subscribe();
   }
 
+  // APK (Capacitor): системные уведомления через плагин LocalNotifications.
+  // В браузере плагина нет, работает обычный Notification API.
+  function nativeNotifier() {
+    const p = window.Capacitor && window.Capacitor.Plugins;
+    return (p && p.LocalNotifications) || null;
+  }
+  async function nativeNotifyPermission(LN) {
+    const cur = await LN.checkPermissions();
+    let state = cur && cur.display;
+    if (state !== "granted") {
+      const req = await LN.requestPermissions();
+      state = req && req.display;
+    }
+    if (state === "granted") {
+      await LN.createChannel({ id: "messages", name: "Сообщения", importance: 4, visibility: 1 }).catch(function () {});
+    }
+    return state === "granted";
+  }
+  function wireNativeNotifications(LN) {
+    LN.addListener("localNotificationActionPerformed", function (ev) {
+      const chatId = ev && ev.notification && ev.notification.extra && ev.notification.extra.chat;
+      if (!chatId) return;
+      S.pendingOpen = chatId;
+      tryPendingOpen();
+    });
+  }
+  // Тап по уведомлению может прийти раньше, чем загрузились чаты: открываем, когда будут готовы.
+  function tryPendingOpen() {
+    if (!S.pendingOpen || !S.entered || !S.chats.some(function (x) { return x.id === S.pendingOpen; })) return;
+    const id = S.pendingOpen;
+    S.pendingOpen = null;
+    openChat(id);
+  }
+  function clearNativeNotifs(chatId) {
+    const LN = nativeNotifier();
+    if (!LN) return;
+    LN.getDeliveredNotifications().then(function (r) {
+      const list = ((r && r.notifications) || []).filter(function (n) { return n.extra && n.extra.chat === chatId; });
+      if (list.length) LN.removeDeliveredNotifications({ notifications: list.map(function (n) { return { id: n.id, tag: n.tag }; }) });
+    }).catch(function () {});
+  }
+  let nativeNotifId = 1000;
   function notifyFor(m) {
-    if (!("Notification" in window) || Notification.permission !== "granted") return;
     const c = S.chats.find(function (x) { return x.id === m.chat_id; });
     if (c && c.muted) return;
-    if (!document.hidden && S.open === m.chat_id) return;
     const sender = pName(S.profiles.get(m.sender_id));
     const body = (c && c.kind !== "direct" ? sender + ": " : "") + (EchoE2E.isEncrypted(m.body) ? "Новое сообщение" : (m.body || "Вложение"));
+    const title = c ? chatTitle(c) : "Echo";
+    const LN = nativeNotifier();
+    if (LN) {
+      // В открытом приложении список и так обновляется сам, системное уведомление не нужно.
+      if (!document.hidden) return;
+      nativeNotifId = nativeNotifId >= 2147480000 ? 1000 : nativeNotifId + 1;
+      LN.schedule({ notifications: [{ id: nativeNotifId, title: title, body: body, channelId: "messages", extra: { chat: m.chat_id }, schedule: { at: new Date(Date.now() + 100) } }] }).catch(function () {});
+      return;
+    }
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    if (!document.hidden && S.open === m.chat_id) return;
     try {
-      new Notification(c ? chatTitle(c) : "Echo", { body: body, tag: m.chat_id, icon: "icon.png" });
+      new Notification(title, { body: body, tag: m.chat_id, icon: "icon.png" });
     } catch (e) {}
   }
 
@@ -2815,6 +2875,8 @@
       toast(decodeURIComponent((m && m[1] || "").replace(/\+/g, " ")) || "Не удалось войти через Google");
       history.replaceState(null, "", location.pathname + location.search);
     }
+    const LN = nativeNotifier();
+    if (LN) wireNativeNotifications(LN);
     const CapAuth = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
     if (CapAuth) {
       CapAuth.addListener("appUrlOpen", async function (ev) {
