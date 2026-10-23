@@ -278,7 +278,7 @@ alter table public.messages replica identity full;
 alter table public.reactions replica identity full;
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('media', 'media', true, 20971520, array['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm','audio/mpeg','audio/mp4','audio/x-m4a','audio/ogg','audio/wav','audio/webm'])
+values ('media', 'media', true, 20971520, array['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm','audio/mpeg','audio/mp4','audio/x-m4a','audio/ogg','audio/wav','audio/webm','application/octet-stream'])
 on conflict (id) do nothing;
 
 create policy media_insert_own on storage.objects for insert to authenticated with check (
