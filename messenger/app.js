@@ -1912,6 +1912,10 @@
   function onPpScroll() {
     const sc = Math.max(0, $("pp-scroll").scrollTop);
     const pr = Math.min(1, sc / 60);
+    const full = Math.round(Math.min(540, Math.max(400, innerHeight * 0.52)));
+    const hh = Math.max(360, full - sc);
+    $("pp-hero").style.height = hh + "px";
+    $("pp-body").style.marginTop = (full - hh) + "px";
     $("pp-over").classList.toggle("pp-over-c", pr >= 0.5);
     $("profile-page").style.setProperty("--p", pr.toFixed(3));
   }
