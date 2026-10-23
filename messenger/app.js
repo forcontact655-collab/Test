@@ -14,12 +14,14 @@
   ];
   const SMILES = [":D", "xD", "=)", ":3", "^_^", "^_~", "-_-", ":(", ":'(", "o_O", ">_<", "\\o/", "<3", "+1", "-1", ";)", ":P", ":O", "8)", "XD", "(-_-)", "(>_<)", "*_*", "T_T", "^^", "xP", ":S", ":|", "@_@", "~o~", "\\m/", "(y)", "(n)", "(!)", "(?)", ":*", "B)", "(:"];
   const GRADS = [
-    "linear-gradient(135deg,#7c3aed,#c084fc)",
-    "linear-gradient(135deg,#6d28d9,#a78bfa)",
-    "linear-gradient(135deg,#a21caf,#f0abfc)",
-    "linear-gradient(135deg,#4c1d95,#8b5cf6)",
-    "linear-gradient(135deg,#7e22ce,#e879f9)",
-    "linear-gradient(135deg,#5b21b6,#f472b6)"
+    "linear-gradient(135deg,#7c3aed,#c084fc)", // фиолетовый
+    "linear-gradient(135deg,#1d4ed8,#38bdf8)", // синий
+    "linear-gradient(135deg,#0f766e,#2dd4bf)", // бирюзовый
+    "linear-gradient(135deg,#c2410c,#fb923c)", // оранжевый
+    "linear-gradient(135deg,#be185d,#f472b6)", // розовый
+    "linear-gradient(135deg,#15803d,#4ade80)", // зелёный
+    "linear-gradient(135deg,#b91c1c,#f87171)", // красный
+    "linear-gradient(135deg,#4338ca,#a5b4fc)"  // индиго
   ];
   const NAME_COLORS = ["#c4b5fd", "#f0abfc", "#a5f3fc", "#fde68a", "#86efac", "#fda4af"];
   const MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
@@ -44,6 +46,8 @@
     mail: "M3 6h18v12H3zM3 7l9 6 9-6",
     user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0",
     sticker: "M15 3H6a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h9l7-7V6a3 3 0 0 0-3-3zM15 21v-4a2 2 0 0 1 2-2h4",
+    group: "M17 20v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM21 20v-1a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8",
+    channel: "M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1zM16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12",
     bell: "M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8zM10 20a2 2 0 0 0 4 0",
     down: "M12 5v14M6 13l6 6 6-6",
     install: "M12 3v12M7 10l5 5 5-5M5 21h14",
@@ -675,22 +679,32 @@
     const fresh = prevUnread === undefined;
     const bumped = !fresh && c.unread > prevUnread;
     S.seen.set(c.id, c.unread);
+    const unreadOn = c.unread > 0 && !c.muted;
     const row1 = h("div", { class: "row1" },
       h("span", { class: "nm", text: chatTitle(c) }),
       c.pinned ? svg(ICON.pin, "mico pin") : null,
-      h("span", { class: "tm", text: c.lastAt ? shortTime(c.lastAt) : "" }));
+      h("span", { class: "tm" + (unreadOn ? " unread" : ""), text: c.lastAt ? shortTime(c.lastAt) : "" }));
     const row2 = h("div", { class: "row2" },
       pv,
       c.muted ? svg(ICON.mute, "mico") : null,
       c.unread > 0 ? h("span", { class: "badge" + (c.muted ? " mute" : "") + (bumped ? "" : " still"), text: c.unread > 99 ? "99+" : String(c.unread) }) : null);
     const it = h("div", {
-      class: "item" + (fresh ? "" : " still") + (c.id === S.open ? " on" : "") + (c.pinned ? " pin" : ""),
+      class: "item" + (fresh ? "" : " still") + (c.id === S.open ? " on" : "") + (c.pinned ? " pin" : "") + (unreadOn ? " unread" : ""),
       dataset: { id: c.id },
       onclick: function () { if (Date.now() - S.lastLong < 700) return; openChat(c.id); },
       oncontextmenu: function (e) { e.preventDefault(); chatMenu(c, e.clientX, e.clientY); }
-    }, avEl(Object.assign({ size: "" }, chatAvProps(c))), h("div", { class: "item-main" }, row1, row2));
+    }, avWrap(c), h("div", { class: "item-main" }, row1, row2));
     bindLongPress(it, function (x, y) { chatMenu(c, x, y); });
     return it;
+  }
+
+  // Аватарка чата; у группы и канала — значок типа в углу (снаружи круга, чтобы не обрезался)
+  function avWrap(c) {
+    const wrap = h("div", { class: "av-wrap" }, avEl(Object.assign({ size: "" }, chatAvProps(c))));
+    if (c.kind !== "direct") {
+      wrap.appendChild(h("span", { class: "kind-ico " + c.kind, "aria-label": kindLabel(c) }, svg(c.kind === "channel" ? ICON.channel : ICON.group)));
+    }
+    return wrap;
   }
 
   function personRow(p) {
@@ -2280,10 +2294,7 @@
     ];
     if (S.installEvt) notifRows.push(rowBtn(rowIco(ICON.install, "#22c55e"), "Установить приложение", "добавить Echo на экран", installApp));
     body.appendChild(spGroup(notifRows));
-    if (!S.installEvt) body.appendChild(h("div", { class: "sp-hint", text: "Установка: Android — меню браузера, «Установить приложение». iPhone — Safari, «Поделиться», «На экран «Домой»»." }));
-    body.appendChild(spGroup([
-      rowBtn(rowIco(ICON.globe, "#8b5cf6"), "Язык", "Русский", function () { toast("Пока только русский"); })
-    ]));
+    if (!S.installEvt && !window.Capacitor) body.appendChild(h("div", { class: "sp-hint", text: "Установка: Android — меню браузера, «Установить приложение». iPhone — Safari, «Поделиться», «На экран «Домой»»." }));
     body.appendChild(spGroup([
       rowBtn(rowIco(ICON.exit, "#ef4444"), "Выйти", "из этого аккаунта на устройстве", logoutConfirm, true),
       rowBtn(rowIco(ICON.exit, "#f59e0b"), "Выйти на других устройствах", "остальные телефоны и браузеры", logoutOthersConfirm)

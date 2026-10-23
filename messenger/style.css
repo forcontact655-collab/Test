@@ -78,6 +78,12 @@ img,video{display:block}
 .item.on{background:linear-gradient(90deg,rgba(124,58,237,.34),rgba(192,38,211,.18))}
 .item.pin::after{content:"";position:absolute;left:3px;top:14px;bottom:14px;width:3px;border-radius:3px;background:var(--grad)}
 .item-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.av-wrap{position:relative;flex:none;width:48px;height:48px}
+.kind-ico{position:absolute;right:-3px;bottom:-3px;width:21px;height:21px;border-radius:50%;display:grid;place-items:center;background:var(--panel2);border:2px solid var(--panel);color:var(--acc);box-shadow:0 2px 6px rgba(0,0,0,.3)}
+.kind-ico.channel{color:var(--acc3)}
+.kind-ico svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round}
+.item.unread .nm{font-weight:720;color:#fff}
+.tm.unread{color:var(--acc2);font-weight:650}
 .row1,.row2{display:flex;align-items:center;gap:8px;min-width:0}
 .nm{flex:1;min-width:0;font-weight:620;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tm{flex:none;font-size:12px;color:var(--dim)}
