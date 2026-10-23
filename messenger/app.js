@@ -52,7 +52,6 @@
     camera: "M4 7h3l2-3h6l2 3h3v12H4zM12 10a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z",
     gear: "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM4 12h2M18 12h2M12 4v2M12 18v2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M6.3 17.7l1.4-1.4M16.3 7.7l1.4-1.4",
     msg: "M4 5h16v11H9l-5 4z",
-    play: "M8 5v14l11-7z",
     pause: "M7 5h4v14H7zM13 5h4v14h-4z",
     vol: "M4 9.5v5h3.5L12 18V6L7.5 9.5H4zM15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11",
     muted: "M4 9.5v5h3.5L12 18V6L7.5 9.5H4zM16 9l5 6M21 9l-5 6",
@@ -77,7 +76,6 @@
   let panelMode = null;
   let panelPack = null;
   let sending = false;
-  let authMode = "login";
   const isTouch = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
 
   const $ = function (id) { return document.getElementById(id); };
@@ -205,9 +203,6 @@
     return isVideo(url)
       ? h("video", { src: url, muted: true, autoplay: true, loop: true, playsinline: true })
       : h("img", { src: url, alt: "", loading: "lazy" });
-  }
-  function kv(label, value) {
-    return h("div", { class: "kv" }, h("small", { text: label }), h("span", { text: value }));
   }
   function emptyNote(text) { return h("div", { class: "empty-note", text: text }); }
   function sectTitle(text) { return h("div", { class: "sect", text: text }); }
@@ -452,11 +447,6 @@
     for (const c of S.chats) {
       if (c.kind === "direct" && c.last && EchoE2E.isEncrypted(c.last.body)) c.last.plain = await plainOf(c.last.body, c);
     }
-  }
-  function applySelf(p) {
-    S.profile = p;
-    S.profiles.set(p.id, p);
-    cacheSet("me", p);
   }
   async function saveLocalKey(priv, pub) {
     await EchoStore.set("me-key", { uid: S.me.id, priv: priv, pub: pub });
@@ -2209,6 +2199,7 @@
   function applySelf(row) {
     S.profile = row;
     S.profiles.set(row.id, row);
+    cacheSet("me", row);
     renderMeBtn();
     if (profilePageOpen()) renderProfilePage();
     if (settingsPageOpen()) renderSettingsPage();
