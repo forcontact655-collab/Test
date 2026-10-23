@@ -458,6 +458,18 @@
     S.profiles.set(p.id, p);
     cacheSet("me", p);
   }
+  async function saveLocalKey(priv, pub) {
+    await EchoStore.set("me-key", { uid: S.me.id, priv: priv, pub: pub });
+    E2E.priv = priv;
+    E2E.missing = false;
+    E2E.keys.clear();
+  }
+  async function publishKey(pub, privB64) {
+    const up = await sb.from("user_keys").upsert({ user_id: S.me.id, pub: pub, priv_pkcs8: privB64, updated_at: new Date().toISOString() });
+    if (up.error) throw up.error;
+    const pr = await sb.from("profiles").update({ public_key: pub }).eq("id", S.me.id).select("*").single();
+    if (!pr.error) applySelf(pr.data);
+  }
   async function e2eInit() {
     if (!window.EchoE2E || !window.EchoStore) return;
     try {
@@ -467,22 +479,53 @@
         E2E.priv = saved.priv;
         E2E.missing = false;
         if (!pub) {
-          const up = await sb.from("profiles").update({ public_key: saved.pub }).eq("id", S.me.id).select("*").single();
-          if (!up.error) applySelf(up.data);
+          const pr = await sb.from("profiles").update({ public_key: saved.pub }).eq("id", S.me.id).select("*").single();
+          if (!pr.error) applySelf(pr.data);
         }
-      } else if (pub) {
+        return;
+      }
+      // Резервная копия на сервере: восстановление на новом устройстве или после переустановки.
+      const row = await sb.from("user_keys").select("pub, priv_pkcs8").eq("user_id", S.me.id).maybeSingle();
+      if (!row.error && row.data && (!pub || row.data.pub === pub)) {
+        const priv = await EchoE2E.importPriv(row.data.priv_pkcs8);
+        await saveLocalKey(priv, row.data.pub);
+        if (!pub) {
+          const pr = await sb.from("profiles").update({ public_key: row.data.pub }).eq("id", S.me.id).select("*").single();
+          if (!pr.error) applySelf(pr.data);
+        }
+        return;
+      }
+      if (pub) {
+        // Ключ в профиле есть, а копии нет (ключ создан до резервной копии): создать новый можно вручную.
         E2E.priv = null;
         E2E.missing = true;
-      } else {
-        const k = await EchoE2E.generate();
-        await EchoStore.set("me-key", { uid: S.me.id, priv: k.privateKey, pub: k.publicKey });
-        E2E.priv = k.privateKey;
-        const up = await sb.from("profiles").update({ public_key: k.publicKey }).eq("id", S.me.id).select("*").single();
-        if (!up.error) applySelf(up.data);
+        return;
       }
+      const k = await EchoE2E.generate();
+      await saveLocalKey(k.privateKey, k.publicKey);
+      await publishKey(k.publicKey, k.privB64);
     } catch (e) {
       E2E.priv = null;
+      E2E.missing = true;
     }
+  }
+  async function resetE2EKey() {
+    const k = await EchoE2E.generate();
+    await publishKey(k.publicKey, k.privB64);
+    await saveLocalKey(k.privateKey, k.publicKey);
+    toast("Создан новый ключ шифрования");
+  }
+  function e2eSheet() {
+    openSheet("Шифрование личных чатов", function (b) {
+      b.appendChild(h("p", { class: "hint", text: E2E.priv
+        ? "Ключ есть на этом устройстве. Его резервная копия хранится на сервере, поэтому после переустановки ключ восстановится сам."
+        : "Ключ на этом устройстве не найден, поэтому личные сообщения не открываются и не отправляются. Старые сообщения, зашифрованные прежним ключом, после создания нового ключа не откроются." }));
+      if (!E2E.priv) {
+        b.appendChild(h("div", { class: "btn-row" }, btnDanger("Создать новый ключ", async function () {
+          try { await resetE2EKey(); closeSheet(); } catch (e) { toast(errMsg(e)); }
+        })));
+      }
+    });
   }
   async function chatKeyFor(otherId) {
     if (!E2E.priv || !otherId) return null;
@@ -2100,7 +2143,7 @@
       rowBtn(rowIco(ICON.user, "#4285f4"), "Google", googleLinked(S.me) ? "привязан" : "не привязан, нажми, чтобы привязать", function () { if (googleLinked(S.me)) toast("Google уже привязан"); else linkGoogle(); }),
       rowBtn(rowIco(ICON.brush, "#a855f7"), "Оформление профиля", "фон и музыка профиля", function () { profileStyleSheet(); }),
       rowBtn(rowIco(ICON.hash, "#0ea5e9"), "Мой ID", String(p.uid || "—"), function () { copyText(String(p.uid)); }),
-      rowBtn(rowIco(ICON.lock, "#10b981"), "Шифрование личных чатов", E2E.priv ? "включено, ключ на этом устройстве" : "ключ недоступен на этом устройстве", function () { toast(E2E.priv ? "Личные сообщения шифруются end-to-end" : "На этом устройстве нет ключа: личные сообщения не отправятся"); })
+      rowBtn(rowIco(ICON.lock, "#10b981"), "Шифрование личных чатов", E2E.priv ? "включено, ключ на этом устройстве" : "ключ недоступен на этом устройстве", function () { e2eSheet(); })
     ]));
     const notifRows = [
       rowBtn(rowIco(ICON.sticker, "#f97316"), "Стикеры", "паки, свои картинки и GIF", function () { stickerSheet(); }),
