@@ -269,7 +269,7 @@ img,video{display:block}
 .pw-eye{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:40px;height:40px;border-radius:12px;display:grid;place-items:center;color:var(--muted)}
 .pw-eye:hover{color:var(--text);background:rgba(167,139,250,.12)}
 .pw-eye svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
-.pp{position:fixed;inset:0;z-index:40;overflow:hidden;background:var(--pbg,#5b21b6);animation:ppIn .4s var(--ease) both}
+.pp{position:fixed;inset:0;z-index:40;overflow:hidden;background:linear-gradient(180deg,var(--pbg,#5b21b6) 0%,#0f0a1d 520px);animation:ppIn .4s var(--ease) both}
 .pp.hidden{display:none}
 @keyframes ppIn{from{transform:translateX(28px);opacity:0}to{transform:none;opacity:1}}
 .pp-scroll{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:none}
@@ -403,7 +403,6 @@ img,video{display:block}
 .vp-btn:hover{background:rgba(255,255,255,.1)}
 .vp-ico{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .vp-solid{width:22px;height:22px;fill:currentColor;stroke:none}
-.pp-hero::after{display:none}
 .pp-body{text-align:center}
 .pp-card,.pp-music{text-align:left}
 .profile-status{display:inline-block}
