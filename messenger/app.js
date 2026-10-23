@@ -6,7 +6,13 @@
   const DOMAIN = "gemgram.app";
   const MB = 1024 * 1024;
   const EDIT_MS = 48 * 3600 * 1000;
-  const REACTS = [":D", "xD", "=)", ":3", "^_~", "\\o/", "<3", ":(", "o_O", "+1"];
+  const REACTS = ["👍", "❤️", "🔥", "😂", "😮", "😢", "🙏", "🎉"];
+  const EMOJI_SETS = [
+    { t: "Смайлы", e: ["😀","😃","😄","😁","😆","😅","😂","🤣","😊","😇","🙂","🙃","😉","😍","🥰","😘","😋","😎","🤓","🧐","🤔","🤨","😐","😶","😏","😒","🙄","😬","😴","😪","😷","🤒","🤕","🤢","🤮","🤧","🥵","🥶","😵","🤯","🤠","🥳","😭","😢","😤","😠","😡","🤬","😱","😨","😰","😥","😓","🤗","🤭"] },
+    { t: "Жесты", e: ["👍","👎","👌","✌️","🤞","🤟","🤘","🤙","👈","👉","👆","👇","☝️","👋","🤚","🖐️","✋","🖖","👏","🙌","🤝","🙏","✍️","💪"] },
+    { t: "Сердца и символы", e: ["❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💔","❣️","💕","💞","💓","💗","💖","💘","💝","💯","💥","💫","✨","🔥","⭐","🌟","✅","❌","❓","❗","⚡","🎉","🎊","🎁","🏆","🥇"] },
+    { t: "Животные и вещи", e: ["🐶","🐱","🐭","🦊","🐻","🐼","🐸","🐵","🐔","🐧","🦄","🐝","🌸","🌹","🌻","🌲","🍀","🍕","🍔","🍟","🌮","🍣","🍩","🍪","☕","🍺","🎵","🎮","🎲","📷","💡","📌","📎","🔒","🔑","🚀","🌙","☀️","🌈","❄️"] }
+  ];
   const SMILES = [":D", "xD", "=)", ":3", "^_^", "^_~", "-_-", ":(", ":'(", "o_O", ">_<", "\\o/", "<3", "+1", "-1", ";)", ":P", ":O", "8)", "XD", "(-_-)", "(>_<)", "*_*", "T_T", "^^", "xP", ":S", ":|", "@_@", "~o~", "\\m/", "(y)", "(n)", "(!)", "(?)", ":*", "B)", "(:"];
   const GRADS = [
     "linear-gradient(135deg,#7c3aed,#c084fc)",
@@ -46,7 +52,8 @@
     note: "M9 18V6l10-2v12",
     brush: "M12 3a9 9 0 1 0 0 18c1 0 1.5-.7 1.5-1.5 0-.4-.2-.7-.4-1-.2-.3-.4-.6-.4-1 0-.8.7-1.5 1.5-1.5H16a5 5 0 0 0 5-5c0-4.4-4-8-9-8z",
     hash: "M4 9h16M4 15h16M10 4l-2 16M16 4l-2 16",
-    globe: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18"
+    globe: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18",
+    lock: "M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z"
   };
 
   const S = {
@@ -57,6 +64,7 @@
     typingCh: null, presCh: null, dbCh: null, installEvt: null, lastLong: 0, refreshT: null
   };
   const typingMap = new Map();
+  const E2E = { priv: null, missing: false, keys: new Map(), plain: new Map() };
   const PP = { uid: null };
   const PALETTE = ["#7c3aed", "#c026d3", "#db2777", "#e11d48", "#ea580c", "#ca8a04", "#16a34a", "#0d9488", "#2563eb", "#334155"];
   let panelMode = null;
@@ -284,20 +292,33 @@
     if (S.entered) return;
     S.entered = true;
     S.me = user;
-    const r = await sb.from("profiles").select("*").eq("id", user.id).maybeSingle();
+    let r = await sb.from("profiles").select("*").eq("id", user.id).maybeSingle();
+    if (r.error && isNetErr(r.error)) {
+      const cp = await cacheGet("me");
+      if (!cp) {
+        S.entered = false;
+        hideBoot();
+        toast("Нет сети. Войди, когда появится связь");
+        return;
+      }
+      r = { data: cp, error: null };
+    }
     if (r.error || !r.data) {
       toast("Профиль не найден");
       await sb.auth.signOut();
       location.reload();
       return;
     }
+    if (!r.error && r.data.id === user.id) cacheSet("me", r.data);
     S.profile = r.data;
     S.profiles.set(r.data.id, r.data);
     $("auth").classList.add("hidden");
     $("app").classList.remove("hidden");
     hideBoot();
     renderMeBtn();
+    await e2eInit();
     await Promise.all([loadChats(), loadPacks()]);
+    flushOutbox();
     connectRealtime();
     heartbeat();
     setInterval(heartbeat, 120000);
@@ -327,15 +348,16 @@
   }
 
   async function loadChats() {
+    if (!navigator.onLine) return loadCachedChats();
     const me = S.me.id;
     const mem = await sb.from("chat_members").select("chat_id, role, pinned, muted, last_read_at, chats(id, kind, title, description, avatar_url, avatar_animated, created_by)").eq("user_id", me);
-    if (mem.error) return toast(errMsg(mem.error));
+    if (mem.error) return isNetErr(mem.error) ? loadCachedChats() : toast(errMsg(mem.error));
     const mine = (mem.data || []).filter(function (r) { return r.chats; });
     const ids = mine.map(function (r) { return r.chat_id; });
     let all = [];
     if (ids.length) {
-      const r = await sb.from("chat_members").select("chat_id, user_id, role, last_read_at, profiles(id, uid, username, display_name, bio, status_emoji, status_text, avatar_url, avatar_animated, last_seen, profile_bg, music_url, music_title)").in("chat_id", ids);
-      if (r.error) return toast(errMsg(r.error));
+      const r = await sb.from("chat_members").select("chat_id, user_id, role, last_read_at, profiles(id, uid, username, display_name, bio, status_emoji, status_text, avatar_url, avatar_animated, last_seen, profile_bg, music_url, music_title, public_key)").in("chat_id", ids);
+      if (r.error) return isNetErr(r.error) ? loadCachedChats() : toast(errMsg(r.error));
       all = r.data || [];
     }
     const st = await sb.rpc("my_chat_stats");
@@ -363,6 +385,8 @@
     const need = [];
     S.chats.forEach(function (c) { if (c.last && c.last.sender) need.push(c.last.sender); });
     await ensureProfiles(need);
+    await warmPreviews();
+    cacheChats();
     if (S.open && !S.chats.some(function (c) { return c.id === S.open; })) closeChat();
     renderSidebar();
     if (S.open) {
@@ -385,7 +409,7 @@
 
   async function ensureProfiles(ids) {
     const need = Array.from(new Set(ids.filter(function (id) { return id && !S.profiles.has(id); })));
-    if (!need.length) return;
+    if (!need.length || !navigator.onLine) return;
     const r = await sb.from("profiles").select("*").in("id", need);
     (r.data || []).forEach(function (p) { S.profiles.set(p.id, p); });
   }
@@ -403,16 +427,154 @@
     });
   }
 
+  function shown(m) { return m._plain !== undefined ? m._plain : m.body; }
+  function plainPrev(body) { return EchoE2E.isEncrypted(body) ? "🔒 Зашифровано" : body; }
+  function prevText(l) {
+    if (l.plain !== undefined) return l.plain;
+    return EchoE2E.isEncrypted(l.body) ? "🔒 Зашифровано" : l.body;
+  }
+  function isNetErr(e) {
+    return !navigator.onLine || /fetch|network|load failed/i.test(String(e && (e.message || e)));
+  }
+  function cacheGet(k) { return window.EchoStore ? EchoStore.get(k).catch(function () { return null; }) : Promise.resolve(null); }
+  function cacheSet(k, v) { if (window.EchoStore) EchoStore.set(k, JSON.parse(JSON.stringify(v))).catch(function () {}); }
+  function cacheChats() {
+    setOffline(false);
+    cacheSet("chats", { chats: S.chats, profiles: Array.from(S.profiles.values()) });
+  }
+  async function loadCachedChats() {
+    const snap = await cacheGet("chats");
+    setOffline(true);
+    if (!snap || !snap.chats) return;
+    (snap.profiles || []).forEach(function (p) { S.profiles.set(p.id, Object.assign({}, S.profiles.get(p.id) || {}, p)); });
+    S.chats = snap.chats;
+    renderSidebar();
+    if (S.open) openChat(S.open);
+  }
+  function setOffline(on) {
+    const b = $("offline-bar");
+    if (b) b.classList.toggle("hidden", !on);
+  }
+  async function warmPreviews() {
+    for (const c of S.chats) {
+      if (c.kind === "direct" && c.last && EchoE2E.isEncrypted(c.last.body)) c.last.plain = await plainOf(c.last.body, c);
+    }
+  }
+  function applySelf(p) {
+    S.profile = p;
+    S.profiles.set(p.id, p);
+    cacheSet("me", p);
+  }
+  async function e2eInit() {
+    if (!window.EchoE2E || !window.EchoStore) return;
+    try {
+      const saved = await EchoStore.get("me-key");
+      const pub = S.profile.public_key;
+      if (saved && saved.uid === S.me.id && (!pub || pub === saved.pub)) {
+        E2E.priv = saved.priv;
+        E2E.missing = false;
+        if (!pub) {
+          const up = await sb.from("profiles").update({ public_key: saved.pub }).eq("id", S.me.id).select("*").single();
+          if (!up.error) applySelf(up.data);
+        }
+      } else if (pub) {
+        E2E.priv = null;
+        E2E.missing = true;
+      } else {
+        const k = await EchoE2E.generate();
+        await EchoStore.set("me-key", { uid: S.me.id, priv: k.privateKey, pub: k.publicKey });
+        E2E.priv = k.privateKey;
+        const up = await sb.from("profiles").update({ public_key: k.publicKey }).eq("id", S.me.id).select("*").single();
+        if (!up.error) applySelf(up.data);
+      }
+    } catch (e) {
+      E2E.priv = null;
+    }
+  }
+  async function chatKeyFor(otherId) {
+    if (!E2E.priv || !otherId) return null;
+    let p = S.profiles.get(otherId);
+    if ((!p || !p.public_key) && navigator.onLine) {
+      const r = await sb.from("profiles").select("*").eq("id", otherId).maybeSingle();
+      if (r.data) {
+        p = Object.assign({}, p || {}, r.data);
+        S.profiles.set(otherId, p);
+      }
+    }
+    if (!p || !p.public_key) return null;
+    const id = otherId + "|" + p.public_key;
+    if (!E2E.keys.has(id)) E2E.keys.set(id, await EchoE2E.deriveChatKey(E2E.priv, p.public_key));
+    return E2E.keys.get(id);
+  }
+  async function plainOf(body, c) {
+    if (!EchoE2E.isEncrypted(body) || !c || c.kind !== "direct") return body;
+    if (E2E.plain.has(body)) return E2E.plain.get(body);
+    if (!E2E.priv) return "🔒 Ключ на другом устройстве";
+    let out;
+    try {
+      const k = await chatKeyFor(c.otherId);
+      if (!k) return "🔒 Нет ключа собеседника";
+      out = await EchoE2E.decrypt(k, body);
+    } catch (e) {
+      out = "🔒 Не удалось расшифровать";
+    }
+    E2E.plain.set(body, out);
+    return out;
+  }
+  async function prepMsgs(list, c) {
+    for (const m of list) {
+      if (EchoE2E.isEncrypted(m.body) && m._plain === undefined) m._plain = await plainOf(m.body, c);
+    }
+  }
+  async function encryptFor(c, text) {
+    if (!E2E.priv) throw new Error("На этом устройстве нет ключа шифрования");
+    if (text.length > 1800) throw new Error("В личном чате максимум 1800 символов");
+    const k = await chatKeyFor(c.otherId);
+    if (!k) throw new Error("У собеседника ещё нет ключа шифрования");
+    return EchoE2E.encrypt(k, text);
+  }
+  async function outBody(c, text) {
+    return c.kind === "direct" && text ? encryptFor(c, text) : text;
+  }
+  async function flushOutbox() {
+    if (!window.EchoStore || !navigator.onLine) return;
+    const items = (await EchoStore.outboxAll().catch(function () { return []; })).sort(function (a, b) { return a.created - b.created; });
+    let sent = 0;
+    for (const it of items) {
+      const r = await sb.from("messages").insert({ chat_id: it.chat_id, sender_id: S.me.id, kind: "text", body: it.body, reply_to: it.reply_to || null }).select("*").single();
+      if (r.error) break;
+      await EchoStore.outboxDel(it.lid);
+      sent++;
+    }
+    if (sent) {
+      toast("Отправлено сообщений: " + sent);
+      if (S.open) openChat(S.open);
+      scheduleChats();
+    }
+  }
+  function openEmojiSheet(m) {
+    openSheet("Реакция", function (b) {
+      EMOJI_SETS.forEach(function (set) {
+        b.appendChild(h("div", { class: "ttl", text: set.t }));
+        const grid = h("div", { class: "emo-grid" });
+        set.e.forEach(function (e) {
+          grid.appendChild(h("button", { type: "button", text: e, onclick: function () { closeSheet(); toggleReact(m, e); } }));
+        });
+        b.appendChild(grid);
+      });
+    });
+  }
+
   function previewLine(c) {
     if (!c.last) return "Нет сообщений";
     const l = c.last;
     let body;
     if (l.deleted) body = "Сообщение удалено";
-    else if (l.kind === "text") body = l.body;
-    else if (l.kind === "image") body = l.body || "Фото";
-    else if (l.kind === "video") body = l.body || "Видео";
+    else if (l.kind === "text") body = prevText(l);
+    else if (l.kind === "image") body = prevText(l) || "Фото";
+    else if (l.kind === "video") body = prevText(l) || "Видео";
     else if (l.kind === "sticker") body = "Стикер";
-    else body = l.body;
+    else body = prevText(l);
     let who = "";
     if (l.sender === S.me.id) who = "Вы: ";
     else if (c.kind !== "direct") who = pName(S.profiles.get(l.sender)) + ": ";
@@ -460,7 +622,7 @@
       avEl(chatAvProps(c)),
       h("div", { class: "item-main" },
         h("div", { class: "row1" }, h("span", { class: "nm", text: chatTitle(c) }), h("span", { class: "tm", text: shortTime(m.created_at) })),
-        h("div", { class: "row2" }, h("span", { class: "pv", text: (m.sender_id === S.me.id ? "Вы: " : "") + m.body }))));
+        h("div", { class: "row2" }, h("span", { class: "pv", text: (m.sender_id === S.me.id ? "Вы: " : "") + plainPrev(m.body) }))));
   }
 
   function renderSidebar() {
@@ -589,11 +751,16 @@
     renderComposer();
     renderTimeline(true);
     renderSidebar();
-    const r = await sb.from("messages").select("*, reactions(message_id, user_id, emoji)").eq("chat_id", id).order("created_at", { ascending: false }).limit(80);
+    const r = navigator.onLine ? await sb.from("messages").select("*, reactions(message_id, user_id, emoji)").eq("chat_id", id).order("created_at", { ascending: false }).limit(80) : { data: null, error: { message: "Failed to fetch: offline" } };
     if (S.open !== id) return;
-    if (r.error) return toast(errMsg(r.error));
-    S.messages = (r.data || []).reverse();
+    if (r.error && !isNetErr(r.error)) return toast(errMsg(r.error));
+    if (r.error) S.messages = ((await cacheGet("msgs:" + id)) || []).slice();
+    else {
+      S.messages = (r.data || []).reverse();
+      cacheSet("msgs:" + id, S.messages.slice(-80));
+    }
     S.loadedChat = id;
+    await prepMsgs(S.messages, c);
     await ensureProfiles(S.messages.map(function (m) { return m.sender_id; }));
     renderTimeline(true);
     if (S.jumpMsg) await jumpToMessage(S.jumpMsg);
@@ -634,7 +801,7 @@
     if (r) {
       who = r.sender_id === S.me.id ? "Вы" : pName(S.profiles.get(r.sender_id));
       if (r.deleted_at) text = "Сообщение удалено";
-      else text = r.body || (r.kind === "sticker" ? "Стикер" : r.kind === "video" ? "Видео" : "Фото");
+      else text = shown(r) || (r.kind === "sticker" ? "Стикер" : r.kind === "video" ? "Видео" : "Фото");
     }
     return h("div", { class: "quote", onclick: function (e) { e.stopPropagation(); jumpTo(id); } },
       h("b", { text: who }), h("span", { text: text }));
@@ -682,7 +849,7 @@
           ? h("video", { class: "sticker-img", src: m.media_url, autoplay: true, loop: true, muted: true, playsinline: true })
           : h("img", { class: "sticker-img", src: m.media_url, alt: "стикер", loading: "lazy" }));
       }
-      if (m.body) b.appendChild(h("div", { class: "text", text: m.body }));
+      if (shown(m)) b.appendChild(h("div", { class: "text", text: shown(m) }));
     }
     const readAll = me && !deleted && readByAll(m, c);
     const meta = h("div", { class: "meta" },
@@ -743,6 +910,7 @@
     if (!S.messages.some(function (x) { return x.id === m.id; })) {
       const r = await sb.from("messages").select("*, reactions(message_id, user_id, emoji)").eq("chat_id", m.chat_id).lte("created_at", m.created_at).order("created_at", { ascending: false }).limit(60);
       const extra = (r.data || []).reverse();
+      await prepMsgs(extra, S.chats.find(function (x) { return x.id === m.chat_id; }));
       const ids = new Set(S.messages.map(function (x) { return x.id; }));
       const merged = extra.filter(function (x) { return !ids.has(x.id); }).concat(S.messages);
       merged.sort(function (a, b) { return a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0; });
@@ -764,7 +932,7 @@
       else S.replyTo = null;
     }
     if (S.editing) {
-      box.appendChild(bar("Редактирование", S.editing.body, function () {
+      box.appendChild(bar("Редактирование", shown(S.editing), function () {
         S.editing = null;
         $("input").value = "";
         autosize();
@@ -774,7 +942,7 @@
   }
   function previewBody(m) {
     if (m.deleted_at) return "Сообщение удалено";
-    return m.body || (m.kind === "sticker" ? "Стикер" : m.kind === "video" ? "Видео" : "Фото");
+    return shown(m) || (m.kind === "sticker" ? "Стикер" : m.kind === "video" ? "Видео" : "Фото");
   }
   function bar(title, text, onClose) {
     return h("div", { class: "bar" },
@@ -841,10 +1009,22 @@
     if (!c) return;
     const row = Object.assign({ chat_id: c.id, sender_id: S.me.id, kind: "text", body: "" }, fields);
     if (S.replyTo) row.reply_to = S.replyTo;
+    const plain = row.body;
+    if (plain && c.kind === "direct") row.body = await encryptFor(c, plain);
+    if (!navigator.onLine) {
+      if (row.kind !== "text") return toast("Без сети отправляется только текст");
+      const lid = "L" + Date.now().toString(36) + rnd();
+      if (window.EchoStore) await EchoStore.outboxAdd({ lid: lid, chat_id: c.id, body: row.body, reply_to: row.reply_to || null, created: Date.now() });
+      S.replyTo = null;
+      renderBars();
+      addMessage({ id: lid, chat_id: c.id, sender_id: S.me.id, kind: "text", body: row.body, _plain: plain, created_at: new Date().toISOString(), reactions: [], reply_to: row.reply_to || null });
+      return toast("Нет сети. Сообщение отправится, когда появится связь");
+    }
     const r = await sb.from("messages").insert(row).select("*").single();
     if (r.error) throw r.error;
     S.replyTo = null;
     renderBars();
+    if (row.body !== plain) r.data._plain = plain;
     addMessage(r.data);
     scheduleChats();
   }
@@ -860,8 +1040,11 @@
   }
 
   async function saveEdit(m, text) {
-    const r = await sb.from("messages").update({ body: text }).eq("id", m.id).select("*").single();
+    const chat = curChat();
+    const body = chat ? await outBody(chat, text) : text;
+    const r = await sb.from("messages").update({ body: body }).eq("id", m.id).select("*").single();
     if (r.error) throw r.error;
+    if (body !== text) r.data._plain = text;
     S.editing = null;
     applyMessageUpdate(r.data);
     renderBars();
@@ -870,6 +1053,7 @@
   function applyMessageUpdate(row) {
     const m = S.messages.find(function (x) { return x.id === row.id; });
     if (!m) return;
+    if (row._plain !== undefined) m._plain = row._plain;
     const rx = m.reactions;
     const fresh = m._fresh;
     Object.assign(m, row);
@@ -903,7 +1087,7 @@
   function startEdit(m) {
     S.editing = m;
     S.replyTo = null;
-    $("input").value = m.body || "";
+    $("input").value = shown(m) || "";
     autosize();
     renderBars();
     $("input").focus();
@@ -985,9 +1169,11 @@
       REACTS.forEach(function (e) {
         bar.appendChild(h("button", { type: "button", text: e, onclick: function () { hideCtx(); toggleReact(m, e); } }));
       });
+      const more = h("button", { type: "button", text: "+", "aria-label": "Все эмодзи", onclick: function () { openEmojiSheet(m); } });
+      bar.appendChild(more);
       items.push(bar);
       if (canPost(c)) items.push(mi("Ответить", ICON.reply, function () { S.replyTo = m.id; S.editing = null; renderBars(); $("input").focus(); }));
-      if (m.body) items.push(mi("Копировать", ICON.copy, function () { copyText(m.body); }));
+      if (shown(m)) items.push(mi("Копировать", ICON.copy, function () { copyText(shown(m)); }));
       items.push(mi("Переслать", ICON.fwd, function () { forwardSheet(m); }));
       const mine = m.sender_id === S.me.id;
       if (mine && m.kind === "text" && Date.now() - new Date(m.created_at).getTime() < EDIT_MS) {
@@ -1074,12 +1260,15 @@
         b.appendChild(rowBtn(avEl(Object.assign({ size: "sm" }, chatAvProps(c))), chatTitle(c), kindLabel(c), async function () {
           closeSheet();
           const r = await sb.from("messages").insert({
-            chat_id: c.id, sender_id: S.me.id, kind: m.kind, body: m.body || "",
+            chat_id: c.id, sender_id: S.me.id, kind: m.kind, body: await outBody(c, shown(m) || ""),
             media_url: m.media_url || null, forwarded_from: who
           }).select("*").single();
           if (r.error) return toast(errMsg(r.error));
           toast("Переслано: " + chatTitle(c));
-          if (S.open === c.id) addMessage(r.data);
+          if (S.open === c.id) {
+            r.data._plain = shown(m) || "";
+            addMessage(r.data);
+          }
           scheduleChats();
         }));
       });
@@ -1455,7 +1644,8 @@
     body.appendChild(spGroup([
       rowBtn(rowIco(ICON.user, "#3b82f6"), "Аккаунт", "имя, о себе, статус", function () { myEditSheet(); }),
       rowBtn(rowIco(ICON.brush, "#a855f7"), "Оформление профиля", "фон и музыка профиля", function () { profileStyleSheet(); }),
-      rowBtn(rowIco(ICON.hash, "#0ea5e9"), "Мой ID", String(p.uid || "—"), function () { copyText(String(p.uid)); })
+      rowBtn(rowIco(ICON.hash, "#0ea5e9"), "Мой ID", String(p.uid || "—"), function () { copyText(String(p.uid)); }),
+      rowBtn(rowIco(ICON.lock, "#10b981"), "Шифрование личных чатов", E2E.priv ? "включено, ключ на этом устройстве" : "ключ недоступен на этом устройстве", function () { toast(E2E.priv ? "Личные сообщения шифруются end-to-end" : "На этом устройстве нет ключа: личные сообщения не отправятся"); })
     ]));
     const notifRows = [
       rowBtn(rowIco(ICON.sticker, "#f97316"), "Стикеры", "паки, свои картинки и GIF", function () { stickerSheet(); }),
@@ -1885,7 +2075,7 @@
     if (c && c.muted) return;
     if (!document.hidden && S.open === m.chat_id) return;
     const sender = pName(S.profiles.get(m.sender_id));
-    const body = (c && c.kind !== "direct" ? sender + ": " : "") + (m.body || "Вложение");
+    const body = (c && c.kind !== "direct" ? sender + ": " : "") + (EchoE2E.isEncrypted(m.body) ? "Новое сообщение" : (m.body || "Вложение"));
     try {
       new Notification(c ? chatTitle(c) : "Echo", { body: body, tag: m.chat_id, icon: "icon.png" });
     } catch (e) {}
@@ -1900,10 +2090,15 @@
         notifyFor(rec);
       }
       if (S.open === rec.chat_id && S.loadedChat === rec.chat_id) {
-        addMessage(Object.assign({ reactions: [] }, rec));
+        const incoming = Object.assign({ reactions: [] }, rec);
+        await prepMsgs([incoming], S.chats.find(function (x) { return x.id === rec.chat_id; }));
+        addMessage(incoming);
       }
     } else if (p.eventType === "UPDATE") {
-      if (S.open === rec.chat_id) applyMessageUpdate(rec);
+      if (S.open === rec.chat_id) {
+        await prepMsgs([rec], S.chats.find(function (x) { return x.id === rec.chat_id; }));
+        applyMessageUpdate(rec);
+      }
     } else if (p.eventType === "DELETE") {
       S.messages = S.messages.filter(function (x) { return x.id !== rec.id; });
       if (S.open === rec.chat_id) renderTimeline(false);
@@ -2088,13 +2283,19 @@
       },
         h("div", { class: "item-main" },
           h("div", { class: "row1" }, h("span", { class: "nm", text: m.sender_id === S.me.id ? "Вы" : pName(S.profiles.get(m.sender_id)) }), h("span", { class: "tm", text: shortTime(m.created_at) })),
-          h("div", { class: "row2" }, h("span", { class: "pv", text: m.body }))) ));
+          h("div", { class: "row2" }, h("span", { class: "pv", text: plainPrev(m.body) }))) ));
     });
     p.appendChild(list);
   }
 
   async function boot() {
     wire();
+    setOffline(!navigator.onLine);
+    window.addEventListener("offline", function () { setOffline(true); });
+    window.addEventListener("online", function () {
+      setOffline(false);
+      flushOutbox().then(function () { loadChats(); });
+    });
     setAuthMode("login");
     const r = await sb.auth.getSession();
     if (r.data && r.data.session) return enter(r.data.session.user);
