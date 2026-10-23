@@ -67,7 +67,8 @@
     profiles: new Map(), chats: [], packs: [], online: new Set(),
     folder: "all", query: "", remote: { people: [], messages: [] }, remoteDone: false,
     open: null, messages: [], loadedChat: null, editing: null, replyTo: null, jumpMsg: null,
-    typingCh: null, presCh: null, dbCh: null, installEvt: null, lastLong: 0, refreshT: null
+    typingCh: null, presCh: null, dbCh: null, installEvt: null, lastLong: 0, refreshT: null,
+    seen: new Map(), chatsReady: false
   };
   const typingMap = new Map();
   const E2E = { priv: null, missing: false, keys: new Map(), plain: new Map() };
@@ -299,6 +300,7 @@
     $("app").classList.remove("hidden");
     hideBoot();
     renderMeBtn();
+    await showCachedChats();
     await e2eInit();
     await Promise.all([loadChats(), loadPacks()]);
     flushOutbox();
@@ -374,6 +376,7 @@
     S.chats.forEach(function (c) { if (c.last && c.last.sender) need.push(c.last.sender); });
     await ensureProfiles(need);
     await warmPreviews();
+    S.chatsReady = true;
     cacheChats();
     if (S.open && !S.chats.some(function (c) { return c.id === S.open; })) closeChat();
     renderSidebar();
@@ -428,14 +431,27 @@
   function cacheSet(k, v) { if (window.EchoStore) EchoStore.set(k, JSON.parse(JSON.stringify(v))).catch(function () {}); }
   function cacheChats() {
     setOffline(false);
-    cacheSet("chats", { chats: S.chats, profiles: Array.from(S.profiles.values()) });
+    cacheSet("chats", { uid: S.me.id, chats: S.chats, profiles: Array.from(S.profiles.values()) });
+  }
+  function applyChatSnap(snap) {
+    (snap.profiles || []).forEach(function (p) { S.profiles.set(p.id, Object.assign({}, S.profiles.get(p.id) || {}, p)); });
+    S.chats = snap.chats;
+  }
+  // Показываем чаты из кэша сразу при запуске, пока идёт запрос к сети.
+  // Кэш привязан к пользователю: чужие чаты с этого устройства не показываем.
+  async function showCachedChats() {
+    const snap = await cacheGet("chats");
+    if (!snap || !snap.chats || snap.uid !== S.me.id || S.chatsReady) return;
+    applyChatSnap(snap);
+    S.chatsReady = true;
+    renderSidebar();
   }
   async function loadCachedChats() {
     const snap = await cacheGet("chats");
     setOffline(true);
-    if (!snap || !snap.chats) return;
-    (snap.profiles || []).forEach(function (p) { S.profiles.set(p.id, Object.assign({}, S.profiles.get(p.id) || {}, p)); });
-    S.chats = snap.chats;
+    if (!snap || !snap.chats || snap.uid !== S.me.id) return;
+    applyChatSnap(snap);
+    S.chatsReady = true;
     renderSidebar();
     if (S.open) openChat(S.open);
   }
@@ -622,6 +638,13 @@
   function chatItem(c) {
     const typing = typingIn(c.id);
     const pv = h("span", { class: "pv" + (typing ? " typing" : ""), text: typing ? "печатает…" : previewLine(c) });
+    // Список перерисовывается целиком при каждом обновлении. Анимацию появления
+    // проигрываем только для чатов, которых раньше не было на экране, и для бейджа,
+    // у которого выросло число непрочитанных. Иначе всё мигало бы при каждой перерисовке.
+    const prevUnread = S.seen.get(c.id);
+    const fresh = prevUnread === undefined;
+    const bumped = !fresh && c.unread > prevUnread;
+    S.seen.set(c.id, c.unread);
     const row1 = h("div", { class: "row1" },
       h("span", { class: "nm", text: chatTitle(c) }),
       c.pinned ? svg(ICON.pin, "mico pin") : null,
@@ -629,9 +652,9 @@
     const row2 = h("div", { class: "row2" },
       pv,
       c.muted ? svg(ICON.mute, "mico") : null,
-      c.unread > 0 ? h("span", { class: "badge" + (c.muted ? " mute" : ""), text: c.unread > 99 ? "99+" : String(c.unread) }) : null);
+      c.unread > 0 ? h("span", { class: "badge" + (c.muted ? " mute" : "") + (bumped ? "" : " still"), text: c.unread > 99 ? "99+" : String(c.unread) }) : null);
     const it = h("div", {
-      class: "item" + (c.id === S.open ? " on" : "") + (c.pinned ? " pin" : ""),
+      class: "item" + (fresh ? "" : " still") + (c.id === S.open ? " on" : "") + (c.pinned ? " pin" : ""),
       dataset: { id: c.id },
       onclick: function () { if (Date.now() - S.lastLong < 700) return; openChat(c.id); },
       oncontextmenu: function (e) { e.preventDefault(); chatMenu(c, e.clientX, e.clientY); }
@@ -672,7 +695,9 @@
       return matchFolder(c) && (!q || chatTitle(c).toLowerCase().indexOf(q) >= 0);
     });
     if (!q) {
-      if (!items.length) {
+      // Пока чаты не загружены (ни из кэша, ни с сети), не пишем «Чатов пока нет»:
+      // иначе при каждом раннем обновлении (например, профиль) это мигает на старте.
+      if (!items.length && S.chatsReady) {
         list.appendChild(emptyNote(S.chats.length ? "В этой папке пусто" : "Чатов пока нет. Нажми «+» и найди человека по username"));
       }
       items.forEach(function (c) { list.appendChild(chatItem(c)); });
