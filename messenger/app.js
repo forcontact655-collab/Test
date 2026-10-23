@@ -1548,7 +1548,8 @@
     if (!Plugins || !Plugins.Camera) return pickFile("image/*,video/*", attachFiles, true);
     let res;
     try {
-      res = await Plugins.Camera.chooseFromGallery({ mediaType: "all", allowMultipleSelection: true, limit: 10 });
+      // mediaType: 2 = MediaTypeSelection.All (строка "all" плагин не понимает и берёт фото)
+      res = await Plugins.Camera.chooseFromGallery({ mediaType: 2, allowMultipleSelection: true, limit: 10 });
     } catch (e) {
       if (!/cancel/i.test(String((e && (e.message || e.code)) || ""))) toast("Галерея не открылась");
       return;
