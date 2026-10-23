@@ -196,6 +196,8 @@ jobs:
           sed -i -E "s/versionName \"[^\"]*\"/versionName \"1.0.${GITHUB_RUN_NUMBER}\"/" "$gradle_file"
           grep -q "versionCode ${GITHUB_RUN_NUMBER}" "$gradle_file"
           grep -q "versionName \"1.0.${GITHUB_RUN_NUMBER}\"" "$gradle_file"
+          echo "--- version lines in $gradle_file:"
+          grep -n "version" "$gradle_file" || true
           npx cap sync android
 
       - name: Generate launcher icons
@@ -251,11 +253,31 @@ jobs:
           grep -q 'META-INF/' apk-list.txt
           ls -la "$apk"
 
+      - name: Read APK version
+        run: |
+          apk="$RUNNER_TEMP/echo/android/app/build/outputs/apk/debug/app-debug.apk"
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          tool="$bt/aapt2"
+          [ -x "$tool" ] || tool="$bt/aapt"
+          line=$("$tool" dump badging "$apk" 2>/dev/null | grep -m1 "^package:" || true)
+          echo "APK badging: $line"
+          vn=$(printf '%s' "$line" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
+          vc=$(printf '%s' "$line" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
+          if [ -z "$vn" ]; then
+            echo "::warning::Не удалось прочитать versionName из APK, в version.json пойдёт номер сборки"
+            vn="1.0.${GITHUB_RUN_NUMBER}"
+            vc="${GITHUB_RUN_NUMBER}"
+          elif [ "$vn" != "1.0.${GITHUB_RUN_NUMBER}" ]; then
+            echo "::warning::versionName в APK = $vn, ожидалось 1.0.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "APK_VERSION_NAME=$vn" >> "$GITHUB_ENV"
+          echo "APK_VERSION_CODE=$vc" >> "$GITHUB_ENV"
+
       - name: Prepare APK file
         run: |
           mkdir -p "$RUNNER_TEMP/out-echo"
           cp "$RUNNER_TEMP/echo/android/app/build/outputs/apk/debug/app-debug.apk" "$RUNNER_TEMP/out-echo/echo.apk"
-          printf '{"versionName":"1.0.%s","versionCode":%s,"commit":"%s","built":"%s"}\n' "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_NUMBER" "${GITHUB_SHA:0:7}" "$(date -u +%Y-%m-%d)" > "$RUNNER_TEMP/out-echo/version.json"
+          printf '{\"versionName\":\"%s\",\"versionCode\":%s,\"commit\":\"%s\",\"built\":\"%s\"}\n' "$APK_VERSION_NAME" "$APK_VERSION_CODE" "${GITHUB_SHA:0:7}" "$(date -u +%Y-%m-%d)" > "$RUNNER_TEMP/out-echo/version.json"
           cat "$RUNNER_TEMP/out-echo/version.json"
 
       - name: Upload Echo APK
