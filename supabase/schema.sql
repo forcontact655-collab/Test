@@ -1,0 +1,307 @@
+create table public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  username text not null unique check (username ~ '^[a-z0-9_]{3,32}$'),
+  display_name text not null default '' check (char_length(display_name) <= 64),
+  bio text not null default '' check (char_length(bio) <= 280),
+  status_emoji text not null default '' check (char_length(status_emoji) <= 16),
+  status_text text not null default '' check (char_length(status_text) <= 80),
+  avatar_url text,
+  avatar_animated boolean not null default false,
+  last_seen timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+create table public.chats (
+  id uuid primary key default gen_random_uuid(),
+  kind text not null check (kind in ('direct','group','channel')),
+  title text not null default '' check (char_length(title) <= 64),
+  description text not null default '' check (char_length(description) <= 280),
+  avatar_url text,
+  avatar_animated boolean not null default false,
+  direct_key text unique,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create table public.chat_members (
+  chat_id uuid not null references public.chats(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  role text not null default 'member' check (role in ('owner','admin','member')),
+  pinned boolean not null default false,
+  muted boolean not null default false,
+  last_read_at timestamptz not null default now(),
+  joined_at timestamptz not null default now(),
+  primary key (chat_id, user_id)
+);
+
+create table public.sticker_packs (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  title text not null check (char_length(title) between 1 and 64),
+  short_name text not null unique check (short_name ~ '^[a-z0-9_]{3,40}$'),
+  created_at timestamptz not null default now()
+);
+
+create table public.stickers (
+  id uuid primary key default gen_random_uuid(),
+  pack_id uuid not null references public.sticker_packs(id) on delete cascade,
+  url text not null,
+  animated boolean not null default false,
+  emoji text not null default '' check (char_length(emoji) <= 16),
+  created_at timestamptz not null default now()
+);
+
+create table public.user_sticker_packs (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  pack_id uuid not null references public.sticker_packs(id) on delete cascade,
+  added_at timestamptz not null default now(),
+  primary key (user_id, pack_id)
+);
+
+create table public.messages (
+  id uuid primary key default gen_random_uuid(),
+  chat_id uuid not null references public.chats(id) on delete cascade,
+  sender_id uuid not null references auth.users(id) on delete cascade,
+  kind text not null default 'text' check (kind in ('text','image','sticker','video')),
+  body text not null default '' check (char_length(body) <= 4096),
+  media_url text,
+  reply_to uuid references public.messages(id) on delete set null,
+  forwarded_from text,
+  edited_at timestamptz,
+  deleted_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index messages_chat_created_idx on public.messages (chat_id, created_at);
+
+create table public.reactions (
+  message_id uuid not null references public.messages(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  emoji text not null check (char_length(emoji) <= 16),
+  created_at timestamptz not null default now(),
+  primary key (message_id, user_id, emoji)
+);
+
+create function public.is_member(cid uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.chat_members where chat_id = cid and user_id = auth.uid());
+$$;
+
+create function public.is_chat_admin(cid uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.chat_members where chat_id = cid and user_id = auth.uid() and role in ('owner','admin'));
+$$;
+
+create function public.handle_new_user() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.profiles (id, username, display_name)
+  values (
+    new.id,
+    lower(new.raw_user_meta_data->>'username'),
+    coalesce(nullif(new.raw_user_meta_data->>'display_name', ''), new.raw_user_meta_data->>'username')
+  );
+  return new;
+end $$;
+
+create trigger on_auth_user_created after insert on auth.users
+for each row execute function public.handle_new_user();
+
+create function public.guard_message_update() returns trigger
+language plpgsql as $$
+begin
+  if new.sender_id <> old.sender_id or new.chat_id <> old.chat_id or new.created_at <> old.created_at then
+    raise exception 'message identity is immutable';
+  end if;
+  if old.deleted_at is not null then
+    raise exception 'message already deleted';
+  end if;
+  if new.deleted_at is null and new.body is distinct from old.body then
+    if old.created_at < now() - interval '48 hours' then
+      raise exception 'edit window expired';
+    end if;
+    new.edited_at := now();
+  end if;
+  return new;
+end $$;
+
+create trigger messages_guard before update on public.messages
+for each row execute function public.guard_message_update();
+
+create function public.open_direct(other uuid) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  a uuid;
+  b uuid;
+  cid uuid;
+  k text;
+begin
+  if me is null then raise exception 'not authenticated'; end if;
+  if other = me then raise exception 'cannot chat with yourself'; end if;
+  if not exists (select 1 from public.profiles where id = other) then raise exception 'user not found'; end if;
+  if me < other then a := me; b := other; else a := other; b := me; end if;
+  k := a::text || ':' || b::text;
+  select id into cid from public.chats where direct_key = k;
+  if cid is null then
+    insert into public.chats (kind, direct_key, created_by) values ('direct', k, me) returning id into cid;
+    insert into public.chat_members (chat_id, user_id, role) values (cid, me, 'member'), (cid, other, 'member');
+  else
+    insert into public.chat_members (chat_id, user_id, role) values (cid, me, 'member') on conflict do nothing;
+  end if;
+  return cid;
+end $$;
+
+create function public.create_chat(p_kind text, p_title text, p_description text, p_members uuid[]) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  cid uuid;
+  m uuid;
+begin
+  if me is null then raise exception 'not authenticated'; end if;
+  if p_kind not in ('group','channel') then raise exception 'bad kind'; end if;
+  if char_length(trim(coalesce(p_title, ''))) = 0 then raise exception 'title required'; end if;
+  insert into public.chats (kind, title, description, created_by)
+  values (p_kind, trim(p_title), left(coalesce(p_description, ''), 280), me)
+  returning id into cid;
+  insert into public.chat_members (chat_id, user_id, role) values (cid, me, 'owner');
+  foreach m in array coalesce(p_members, '{}') loop
+    if m <> me and exists (select 1 from public.profiles where id = m) then
+      insert into public.chat_members (chat_id, user_id) values (cid, m) on conflict do nothing;
+    end if;
+  end loop;
+  return cid;
+end $$;
+
+create function public.add_chat_member(p_chat uuid, p_user uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from public.chats where id = p_chat and kind <> 'direct') then raise exception 'not a group'; end if;
+  if not public.is_chat_admin(p_chat) then raise exception 'not allowed'; end if;
+  if not exists (select 1 from public.profiles where id = p_user) then raise exception 'user not found'; end if;
+  insert into public.chat_members (chat_id, user_id) values (p_chat, p_user) on conflict do nothing;
+end $$;
+
+create function public.my_chat_stats() returns table (chat_id uuid, unread bigint, last_at timestamptz)
+language sql stable security invoker set search_path = public as $$
+  select cm.chat_id,
+    (select count(*) from public.messages m
+      where m.chat_id = cm.chat_id and m.created_at > cm.last_read_at
+        and m.sender_id <> auth.uid() and m.deleted_at is null),
+    (select max(m.created_at) from public.messages m where m.chat_id = cm.chat_id)
+  from public.chat_members cm
+  where cm.user_id = auth.uid();
+$$;
+
+alter table public.profiles enable row level security;
+alter table public.chats enable row level security;
+alter table public.chat_members enable row level security;
+alter table public.sticker_packs enable row level security;
+alter table public.stickers enable row level security;
+alter table public.user_sticker_packs enable row level security;
+alter table public.messages enable row level security;
+alter table public.reactions enable row level security;
+
+create policy profiles_select on public.profiles for select to authenticated using (true);
+create policy profiles_update on public.profiles for update to authenticated using (id = auth.uid()) with check (id = auth.uid());
+
+create policy chats_select on public.chats for select to authenticated using (public.is_member(id));
+create policy chats_update on public.chats for update to authenticated using (public.is_chat_admin(id) and kind <> 'direct') with check (public.is_chat_admin(id));
+create policy chats_delete on public.chats for delete to authenticated using (
+  kind <> 'direct' and exists (select 1 from public.chat_members cm where cm.chat_id = chats.id and cm.user_id = auth.uid() and cm.role = 'owner')
+);
+
+create policy chat_members_select on public.chat_members for select to authenticated using (public.is_member(chat_id));
+create policy chat_members_update on public.chat_members for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy chat_members_delete on public.chat_members for delete to authenticated using (user_id = auth.uid());
+
+revoke update on public.profiles from authenticated, anon;
+grant update (username, display_name, bio, status_emoji, status_text, avatar_url, avatar_animated, last_seen) on public.profiles to authenticated;
+revoke update on public.chats from authenticated, anon;
+grant update (title, description, avatar_url, avatar_animated) on public.chats to authenticated;
+revoke update on public.chat_members from authenticated, anon;
+grant update (pinned, muted, last_read_at) on public.chat_members to authenticated;
+revoke update on public.messages from authenticated, anon;
+grant update (body, deleted_at) on public.messages to authenticated;
+
+create policy messages_select on public.messages for select to authenticated using (public.is_member(chat_id));
+create policy messages_insert on public.messages for insert to authenticated with check (
+  sender_id = auth.uid() and exists (
+    select 1 from public.chat_members cm join public.chats c on c.id = cm.chat_id
+    where cm.chat_id = messages.chat_id and cm.user_id = auth.uid()
+      and (c.kind <> 'channel' or cm.role in ('owner','admin'))
+  )
+);
+create policy messages_update on public.messages for update to authenticated using (sender_id = auth.uid()) with check (sender_id = auth.uid());
+
+create policy reactions_select on public.reactions for select to authenticated using (
+  exists (select 1 from public.messages m where m.id = reactions.message_id)
+);
+create policy reactions_insert on public.reactions for insert to authenticated with check (
+  user_id = auth.uid() and exists (select 1 from public.messages m where m.id = reactions.message_id)
+);
+create policy reactions_delete on public.reactions for delete to authenticated using (user_id = auth.uid());
+
+create policy sticker_packs_select on public.sticker_packs for select to authenticated using (true);
+create policy sticker_packs_insert on public.sticker_packs for insert to authenticated with check (owner_id = auth.uid());
+create policy sticker_packs_update on public.sticker_packs for update to authenticated using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+create policy sticker_packs_delete on public.sticker_packs for delete to authenticated using (owner_id = auth.uid());
+
+create policy stickers_select on public.stickers for select to authenticated using (true);
+create policy stickers_insert on public.stickers for insert to authenticated with check (
+  exists (select 1 from public.sticker_packs p where p.id = stickers.pack_id and p.owner_id = auth.uid())
+);
+create policy stickers_update on public.stickers for update to authenticated using (
+  exists (select 1 from public.sticker_packs p where p.id = stickers.pack_id and p.owner_id = auth.uid())
+);
+create policy stickers_delete on public.stickers for delete to authenticated using (
+  exists (select 1 from public.sticker_packs p where p.id = stickers.pack_id and p.owner_id = auth.uid())
+);
+
+create policy user_sticker_packs_select on public.user_sticker_packs for select to authenticated using (user_id = auth.uid());
+create policy user_sticker_packs_insert on public.user_sticker_packs for insert to authenticated with check (user_id = auth.uid());
+create policy user_sticker_packs_delete on public.user_sticker_packs for delete to authenticated using (user_id = auth.uid());
+
+alter table public.messages replica identity full;
+alter table public.reactions replica identity full;
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('media', 'media', true, 20971520, array['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm'])
+on conflict (id) do nothing;
+
+create policy media_insert_own on storage.objects for insert to authenticated with check (
+  bucket_id = 'media' and (storage.foldername(name))[1] = auth.uid()::text
+);
+create policy media_update_own on storage.objects for update to authenticated using (
+  bucket_id = 'media' and (storage.foldername(name))[1] = auth.uid()::text
+);
+create policy media_delete_own on storage.objects for delete to authenticated using (
+  bucket_id = 'media' and (storage.foldername(name))[1] = auth.uid()::text
+);
+
+alter publication supabase_realtime add table public.messages, public.reactions, public.chat_members, public.chats, public.profiles;
+
+drop function if exists public.my_chat_stats();
+
+create function public.my_chat_stats() returns table (chat_id uuid, unread bigint, last_at timestamptz, last_kind text, last_body text, last_sender uuid, last_deleted boolean)
+language sql stable security invoker set search_path = public as $$
+  select cm.chat_id,
+    (select count(*) from public.messages m
+      where m.chat_id = cm.chat_id and m.created_at > cm.last_read_at
+        and m.sender_id <> auth.uid() and m.deleted_at is null),
+    lm.created_at, lm.kind, lm.body, lm.sender_id, (lm.deleted_at is not null)
+  from public.chat_members cm
+  left join lateral (
+    select m.created_at, m.kind, m.body, m.sender_id, m.deleted_at
+    from public.messages m where m.chat_id = cm.chat_id
+    order by m.created_at desc limit 1
+  ) lm on true
+  where cm.user_id = auth.uid();
+$$;
+
+create function public.username_available(u text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select not exists (select 1 from public.profiles where username = lower(u));
+$$;
+
+grant execute on function public.username_available(text) to anon, authenticated;

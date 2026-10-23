@@ -1,13 +1,13 @@
 {
   "name": "Gemgram",
   "short_name": "Gemgram",
-  "description": "Демо-мессенджер Gemgram",
+  "description": "Gemgram: мессенджер с личными чатами, группами, каналами и стикерами",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0e1621",
-  "theme_color": "#17212b",
+  "background_color": "#0f0a1d",
+  "theme_color": "#140d26",
   "lang": "ru",
   "icons": [
     { "src": "icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" },
