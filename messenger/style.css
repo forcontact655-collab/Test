@@ -126,8 +126,11 @@ img,video{display:block}
 .row.me{justify-content:flex-end}
 .bubble{position:relative;max-width:min(76%,540px);padding:8px 12px 6px;border-radius:18px 18px 18px 6px;background:var(--them);box-shadow:0 2px 10px rgba(5,2,15,.25);overflow-wrap:anywhere;transition:transform .25s var(--ease),box-shadow .25s}
 .row.me .bubble{border-radius:18px 18px 6px 18px;background:var(--me);box-shadow:0 6px 18px rgba(91,33,182,.35)}
-.bubble.bare{background:transparent;box-shadow:none;padding:2px}
-.row.me .bubble.bare{background:transparent}
+.bubble.bare{background:transparent;box-shadow:none;padding:0}
+.row.me .bubble.bare{background:transparent;box-shadow:none;padding:0}
+/* стикер: квадрат без подложки, время и галочки поверх картинки в углу, без отдельной полоски */
+.row .bubble.bare .meta{position:absolute;right:6px;bottom:6px;margin:0;padding:2px 6px;border-radius:10px;background:rgba(10,6,20,.55);color:#fff;font-size:11px}
+.row .bubble.bare .reacts{padding-top:4px}
 .bubble.flash{animation:flash 1.3s var(--ease)}
 .sender{font-size:13px;font-weight:700;margin-bottom:2px}
 .fwd{font-size:12.5px;color:var(--acc);margin-bottom:3px;font-style:italic}
