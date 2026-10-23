@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#140d26">
+  <meta name="description" content="Echo: скачать APK для Android. Личные чаты, группы, каналы, стикеры и статусы в реальном времени.">
+  <title>Echo — скачать APK</title>
+  <link rel="icon" type="image/png" href="../assets/icon.png">
+  <style>
+    :root{--bg:#0f0a1d;--panel:#1a1233;--line:rgba(167,139,250,.16);--text:#f5f2ff;--muted:#a79fc9;--acc:#c084fc;--grad:linear-gradient(135deg,#7c3aed 0%,#c026d3 100%)}
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+    body{background:radial-gradient(900px 600px at 10% -10%,#2a1857 0%,transparent 60%),radial-gradient(800px 600px at 110% 110%,#3b1258 0%,transparent 55%),var(--bg);display:flex;align-items:center;justify-content:center;padding:24px}
+    main{width:min(520px,100%);text-align:center;animation:rise .6s cubic-bezier(.2,.8,.2,1) both}
+    .logo{width:96px;height:96px;margin:0 auto;border-radius:28px;display:grid;place-items:center;background:var(--grad);font-size:48px;font-weight:800;box-shadow:0 18px 44px rgba(192,38,211,.35);animation:float 5s ease-in-out infinite}
+    h1{margin-top:18px;font-size:40px;font-weight:780;letter-spacing:.5px}
+    .lead{margin:10px auto 0;color:var(--muted);line-height:1.55;max-width:420px}
+    .dl{display:inline-flex;align-items:center;gap:10px;margin-top:28px;height:58px;padding:0 30px;border-radius:18px;background:var(--grad);color:#fff;font-weight:700;font-size:18px;text-decoration:none;box-shadow:0 14px 34px rgba(192,38,211,.35);transition:transform .2s cubic-bezier(.2,.8,.2,1),box-shadow .3s}
+    .dl:hover{transform:translateY(-2px);box-shadow:0 18px 40px rgba(192,38,211,.5)}
+    .dl:active{transform:scale(.97)}
+    .dl svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+    .meta{margin-top:14px;color:var(--muted);font-size:14px}
+    .card{margin-top:28px;padding:20px 22px;border-radius:22px;background:rgba(26,18,51,.85);border:1px solid var(--line);text-align:left}
+    .card h2{font-size:16px;font-weight:700;margin-bottom:10px;color:#e9d5ff}
+    .card ol,.card ul{padding-left:20px;color:var(--muted);line-height:1.6;font-size:15px}
+    .card li+li{margin-top:4px}
+    .card b{color:var(--text);font-weight:650}
+    .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;justify-content:center}
+    .ghost{display:inline-flex;align-items:center;height:44px;padding:0 18px;border-radius:14px;background:#2b2050;color:var(--text);text-decoration:none;font-weight:600;font-size:15px;transition:background-color .2s}
+    .ghost:hover{background:#363066}
+    .foot{margin-top:22px;color:#6f6395;font-size:13px;line-height:1.5}
+    @keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+    @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+    @media (prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="logo">E</div>
+    <h1>Echo</h1>
+    <p class="lead">Мессенджер с сообщениями в реальном времени: личные чаты, группы, каналы, стикеры и статусы.</p>
+    <a class="dl" href="echo.apk" download>
+      <svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+      Скачать APK
+    </a>
+    <p class="meta">Версия: <span id="ver">загружаем…</span></p>
+
+    <section class="card">
+      <h2>Установка на Android</h2>
+      <ol>
+        <li>Нажми «Скачать APK» и дождись загрузки.</li>
+        <li>Открой файл. Если Android спросит, разреши установку из этого браузера.</li>
+        <li>Открой Echo и войди через свой аккаунт Google. Пароль не нужен, имя пользователя можно выбрать позже.</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>Обновления</h2>
+      <ul>
+        <li>Скачай новый APK и установи его поверх старого. Не нужно ничего удалять.</li>
+        <li>Идентификатор приложения и ключ подписи постоянны, поэтому вход и локальные настройки сохраняются.</li>
+        <li>Сообщения и профиль лежат на сервере, так что потерять их при обновлении нельзя.</li>
+        <li>Echo и Gemshaft имеют разные идентификаторы, поэтому могут стоять на одном телефоне.</li>
+      </ul>
+    </section>
+
+    <div class="row">
+      <a class="ghost" href="../messenger/">Открыть в браузере</a>
+    </div>
+    <p class="foot">APK скачан не из Google Play, поэтому Android показывает предупреждение о неизвестном источнике. Сквозного шифрования и звонков в Echo пока нет.</p>
+  </main>
+  <script>
+    fetch("version.json", { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (v) {
+        document.getElementById("ver").textContent = v.versionName + " · сборка " + v.versionCode + " · " + v.built;
+      })
+      .catch(function () {
+        document.getElementById("ver").textContent = "неизвестна";
+      });
+  </script>
+</body>
+</html>
