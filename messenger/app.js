@@ -1953,7 +1953,7 @@
     const st = statusNode(p);
     if (st) body.appendChild(st);
     const acts = own
-      ? [actBtn("Фото", ICON.camera, function () { pickFile("image/*,video/mp4,video/webm", changeAvatar); }),
+      ? [actBtn("Выбрать фото", ICON.camera, function () { pickFile("image/*,video/mp4,video/webm", changeAvatar); }),
          actBtn("Изменить", ICON.edit, myEditSheet),
          actBtn("Настройки", ICON.gear, openSettingsPage)]
       : [actBtn("Написать", ICON.msg, function () { openDirect(p.id); }),
