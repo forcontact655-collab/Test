@@ -417,3 +417,9 @@ img,video{display:block}
 .o-row{display:flex;gap:8px}
 .o-row button{flex:1;min-width:0}
 .btn-ghost:disabled{opacity:.5}
+.btn-google{display:flex;align-items:center;justify-content:center;gap:10px;height:46px;width:100%;border-radius:14px;background:#fff;color:#1f1f1f;font-weight:600;font-size:15px}
+.btn-google:disabled{opacity:.6}
+.g-mark{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#fff;color:#4285f4;font-weight:800;font-size:16px;font-family:Arial,sans-serif}
+.auth-or{display:flex;align-items:center;gap:10px;margin:12px 0;color:var(--dim);font-size:12.5px}
+.auth-or::before,.auth-or::after{content:"";flex:1;height:1px;background:var(--line)}
+

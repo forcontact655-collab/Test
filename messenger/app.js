@@ -352,6 +352,17 @@
       $("o-send").disabled = false;
     }
   }
+  async function onGoogleLogin() {
+    const btn = $("g-login");
+    btn.disabled = true;
+    try {
+      const r = await sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname } });
+      if (r.error) throw r.error;
+    } catch (err) {
+      toast(errMsg(err));
+      btn.disabled = false;
+    }
+  }
   async function onOtpResend() {
     if (!otpEmail) return showOtpStep("email");
     $("o-resend").disabled = true;
@@ -2717,6 +2728,7 @@
     $("otp-email-form").addEventListener("submit", onOtpSend);
     $("otp-code-form").addEventListener("submit", onOtpVerify);
     $("o-resend").addEventListener("click", onOtpResend);
+    $("g-login").addEventListener("click", onGoogleLogin);
     $("o-back").addEventListener("click", onOtpBack);
     $("legacy-toggle").addEventListener("click", function () { toggleLegacy($("legacy-wrap").classList.contains("hidden")); });
     $("search").addEventListener("input", onSearchInput);
@@ -2865,8 +2877,16 @@
       flushOutbox().then(function () { loadChats(); });
     });
     setAuthMode("login");
+    if (/error_description=/.test(location.hash)) {
+      const m = /error_description=([^&]*)/.exec(location.hash);
+      toast(decodeURIComponent((m && m[1] || "").replace(/\+/g, " ")) || "Не удалось войти через Google");
+      history.replaceState(null, "", location.pathname + location.search);
+    }
     const r = await sb.auth.getSession();
-    if (r.data && r.data.session) return enter(r.data.session.user);
+    if (r.data && r.data.session) {
+      try { await sb.rpc("ensure_profile"); } catch (e) {}
+      return enter(r.data.session.user);
+    }
     showAuth();
   }
 
