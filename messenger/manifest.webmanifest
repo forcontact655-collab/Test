@@ -1,7 +1,7 @@
 {
-  "name": "Gemgram",
-  "short_name": "Gemgram",
-  "description": "Gemgram: мессенджер с личными чатами, группами, каналами и стикерами",
+  "name": "Echo",
+  "short_name": "Echo",
+  "description": "Echo: мессенджер с личными чатами, группами, каналами и стикерами",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
