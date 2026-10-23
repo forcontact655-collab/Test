@@ -154,9 +154,11 @@
   function initial(name) { return (String(name || "?").trim().charAt(0) || "?").toUpperCase(); }
   function pName(p) { return p ? (p.display_name || (p.username ? "@" + p.username : "Пользователь")) : "Неизвестно"; }
   function uTag(p) { return p && p.username ? "@" + p.username : ""; }
+  const APP_AUTH_URL = "com.forcontact655.echo://callback";
+  function authRedirect() { return window.Capacitor ? APP_AUTH_URL : location.origin + location.pathname + location.search; }
   function googleLinked(u) { return !!u && (u.identities || []).some(function (i) { return i.provider === "google"; }); }
   function linkGoogle() {
-    sb.auth.linkIdentity({ provider: "google", options: { redirectTo: location.origin + location.pathname + location.search } }).then(function (r) {
+    sb.auth.linkIdentity({ provider: "google", options: { redirectTo: authRedirect() } }).then(function (r) {
       if (r.error) toast(errMsg(r.error));
     });
   }
@@ -267,7 +269,7 @@
     const btn = $("g-login");
     btn.disabled = true;
     try {
-      const r = await sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname + location.search } });
+      const r = await sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: authRedirect() } });
       if (r.error) throw r.error;
     } catch (err) {
       toast(errMsg(err));
@@ -2752,6 +2754,27 @@
       const m = /error_description=([^&]*)/.exec(location.hash);
       toast(decodeURIComponent((m && m[1] || "").replace(/\+/g, " ")) || "Не удалось войти через Google");
       history.replaceState(null, "", location.pathname + location.search);
+    }
+    const CapAuth = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+    if (CapAuth) {
+      CapAuth.addListener("appUrlOpen", async function (ev) {
+        const url = (ev && ev.url) || "";
+        if (url.indexOf(APP_AUTH_URL) !== 0) return;
+        const hashAt = url.indexOf("#");
+        const q = new URLSearchParams(hashAt >= 0 ? url.slice(hashAt + 1) : "");
+        if (q.get("error_description")) { toast(q.get("error_description")); return; }
+        let res;
+        if (q.get("access_token") && q.get("refresh_token")) {
+          res = await sb.auth.setSession({ access_token: q.get("access_token"), refresh_token: q.get("refresh_token") });
+        } else {
+          const code = new URL(url.replace("com.forcontact655.echo://", "https://x/")).searchParams.get("code");
+          if (!code) { toast("Не удалось войти через Google"); return; }
+          res = await sb.auth.exchangeCodeForSession(code);
+        }
+        if (res.error) { toast(errMsg(res.error)); return; }
+        try { await sb.rpc("ensure_profile"); } catch (e) {}
+        enter(res.data.session.user);
+      });
     }
     const r = await sb.auth.getSession();
     if (r.data && r.data.session) {
