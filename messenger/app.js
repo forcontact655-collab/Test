@@ -2300,9 +2300,45 @@
   function ppMenu(x, y) {
     const p = ppProfile();
     if (!p) return;
-    const items = [mi("Скопировать ID", ICON.copy, function () { copyText(String(p.uid)); })];
-    if (p.id !== S.me.id) items.push(mi("Написать", ICON.msg, function () { openDirect(p.id); }));
+    const items = [];
+    if (p.id === S.me.id) {
+      items.push(mi("Изменить цвет профиля", ICON.brush, function () { profileStyleSheet(); }));
+      items.push(mi("Изменить имя", ICON.edit, function () { myEditSheet(); }));
+      if (p.avatar_url) {
+        items.push(mi("Сохранить в галерею", ICON.lbDownload, function () { saveAvatar(p.avatar_url); }));
+        items.push(mi("Удалить фото", ICON.trash, function () {
+          confirmDlg("Удалить фото?", "Аватар уберётся из профиля и из списка чатов.", "Удалить", removeAvatar);
+        }, true));
+      }
+    } else {
+      items.push(mi("Скопировать ID", ICON.copy, function () { copyText(String(p.uid)); }));
+      items.push(mi("Написать", ICON.msg, function () { openDirect(p.id); }));
+    }
     showCtx(x, y, items);
+  }
+
+  async function saveAvatar(url) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("download");
+      const blob = await res.blob();
+      const ext = (/\.(\w{3,4})(\?|$)/.exec(url) || [0, "jpg"])[1];
+      const obj = URL.createObjectURL(blob);
+      const a = h("a", { href: obj, download: "echo-avatar-" + Date.now().toString(36) + "." + ext });
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(obj); }, 4000);
+    } catch (e) {
+      toast("Не получилось сохранить фото");
+    }
+  }
+
+  async function removeAvatar() {
+    const r = await sb.from("profiles").update({ avatar_url: null, avatar_animated: false }).eq("id", S.me.id).select("*").single();
+    if (r.error) return toast(errMsg(r.error));
+    applySelf(r.data);
+    toast("Фото удалено");
   }
 
   async function openDirect(uid) {
