@@ -38,6 +38,8 @@ create table public.chat_members (
   primary key (chat_id, user_id)
 );
 
+alter table public.chat_members add constraint chat_members_user_profile_fkey foreign key (user_id) references public.profiles(id) on delete cascade;
+
 create table public.sticker_packs (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null references auth.users(id) on delete cascade,

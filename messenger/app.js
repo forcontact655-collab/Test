@@ -42,7 +42,11 @@
     gear: "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM4 12h2M18 12h2M12 4v2M12 18v2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M6.3 17.7l1.4-1.4M16.3 7.7l1.4-1.4",
     msg: "M4 5h16v11H9l-5 4z",
     play: "M8 5v14l11-7z",
-    pause: "M7 5h4v14H7zM13 5h4v14h-4z"
+    pause: "M7 5h4v14H7zM13 5h4v14h-4z",
+    note: "M9 18V6l10-2v12",
+    brush: "M12 3a9 9 0 1 0 0 18c1 0 1.5-.7 1.5-1.5 0-.4-.2-.7-.4-1-.2-.3-.4-.6-.4-1 0-.8.7-1.5 1.5-1.5H16a5 5 0 0 0 5-5c0-4.4-4-8-9-8z",
+    hash: "M4 9h16M4 15h16M10 4l-2 16M16 4l-2 16",
+    globe: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18"
   };
 
   const S = {
@@ -1289,7 +1293,7 @@
   function onPpScroll() {
     const sc = Math.max(0, $("pp-scroll").scrollTop);
     const hh = Math.max(170, 360 - sc);
-    const pr = Math.min(1, sc / 240);
+    const pr = Math.min(1, sc / 60);
     $("pp-hero").style.height = hh + "px";
     $("pp-body").style.marginTop = (360 - hh) + "px";
     $("profile-page").style.setProperty("--p", pr.toFixed(3));
@@ -1332,7 +1336,7 @@
     const acts = own
       ? [actBtn("Фото", ICON.camera, function () { pickFile("image/*,video/mp4,video/webm", changeAvatar); }),
          actBtn("Изменить", ICON.edit, myEditSheet),
-         actBtn("Настройки", ICON.gear, settingsSheet)]
+         actBtn("Настройки", ICON.gear, openSettingsPage)]
       : [actBtn("Написать", ICON.msg, function () { openDirect(p.id); }),
          actBtn("Скопировать ID", ICON.copy, function () { copyText(String(p.uid)); })];
     body.appendChild(h("div", { class: "pp-acts" }, acts));
@@ -1343,39 +1347,46 @@
     info.appendChild(pRow("ID", String(p.uid || "—")));
     info.appendChild(pRow("Статус", online ? "в сети" : "был(а) " + agoText(p.last_seen)));
     body.appendChild(info);
-    if (own) {
-      const deco = h("div", { class: "pp-card" });
-      deco.appendChild(h("div", { class: "pp-card-t", text: "Цвет фона" }));
-      const sw = h("div", { class: "pp-sw" });
-      PALETTE.forEach(function (c) {
-        sw.appendChild(h("button", {
-          class: "pp-dot" + (p.profile_bg === c ? " on" : ""), type: "button",
-          style: { background: c }, "aria-label": "Цвет " + c,
-          onclick: function () { setProfileBg(c); }
-        }));
-      });
-      sw.appendChild(h("input", { type: "color", class: "pp-color", value: p.profile_bg || "#5b21b6", "aria-label": "Свой цвет", onchange: function (e) { setProfileBg(e.target.value); } }));
-      deco.appendChild(sw);
-      deco.appendChild(h("div", { class: "pp-card-t", text: "Музыка профиля" }));
-      deco.appendChild(h("div", { class: "pp-hint", text: p.music_url ? "Играет, когда тебя открывают. Сейчас: " + (p.music_title || "трек") : "Загрузи свой трек: он будет играть, когда тебя открывают." }));
-      deco.appendChild(h("div", { class: "pp-mrow" },
-        btnGhost(p.music_url ? "Сменить трек" : "Выбрать трек", function () { pickFile("audio/*", uploadMusic); }),
-        p.music_url ? btnDanger("Убрать", removeMusic) : null));
-      body.appendChild(deco);
-    }
     syncMusic();
   }
 
+  function fmtTime(sec) {
+    if (!isFinite(sec) || sec < 0) sec = 0;
+    const m = Math.floor(sec / 60), sc = Math.floor(sec % 60);
+    return m + ":" + (sc < 10 ? "0" : "") + sc;
+  }
   function musicCard(p) {
-    return h("div", { class: "pp-music" },
-      h("button", { class: "pp-play", type: "button", "aria-label": "Играть или пауза", onclick: toggleMusic }),
-      h("div", { class: "pp-m-main" }, h("b", { text: p.music_title || "Трек" }), h("span", { text: "Музыка профиля" })));
+    const card = h("div", { class: "pp-music" },
+      h("div", { class: "pp-disc" }, svg(ICON.note, "pp-note")),
+      h("div", { class: "pp-m-main" },
+        h("b", { text: p.music_title || "Трек" }),
+        h("span", { class: "pp-m-sub" }, h("span", { class: "pp-eq" }, h("i"), h("i"), h("i")), "Музыка профиля"),
+        h("div", { class: "pp-bar", onclick: seekMusic }, h("i", { class: "pp-fill" })),
+        h("div", { class: "pp-times" }, h("span", { class: "pp-cur", text: "0:00" }), h("span", { class: "pp-dur" }))),
+      h("button", { class: "pp-play", type: "button", "aria-label": "Играть или пауза", onclick: toggleMusic }));
+    card.style.setProperty("--pbg", ppBg(p));
+    return card;
   }
   function syncMusic() {
     const a = $("pp-audio");
+    const dur = isFinite(a.duration) && a.duration > 0 ? a.duration : 0;
+    const pct = dur ? Math.min(100, a.currentTime / dur * 100) : 0;
+    document.querySelectorAll(".pp-music").forEach(function (c) {
+      c.classList.toggle("playing", !a.paused);
+      c.querySelector(".pp-fill").style.width = pct + "%";
+      c.querySelector(".pp-cur").textContent = fmtTime(a.currentTime);
+      c.querySelector(".pp-dur").textContent = dur ? fmtTime(dur) : "";
+    });
     document.querySelectorAll(".pp-play").forEach(function (b) {
       b.replaceChildren(svg(a.paused ? ICON.play : ICON.pause, "pp-play-ico"));
     });
+  }
+  function seekMusic(e) {
+    const a = $("pp-audio");
+    if (!a.duration || !isFinite(a.duration)) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    a.currentTime = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * a.duration;
+    syncMusic();
   }
   function toggleMusic() {
     const a = $("pp-audio");
@@ -1394,6 +1405,98 @@
     a.src = p.music_url;
     a.play().catch(function () { syncMusic(); });
     syncMusic();
+  }
+
+  function rowIco(d, color) {
+    return h("span", { class: "sp-ico", style: { background: color } }, svg(d, "ico-s"));
+  }
+  function openSettingsPage() {
+    closeSheet();
+    hideCtx();
+    renderSettingsPage();
+    $("settings-page").classList.remove("hidden");
+    $("sp-body").scrollTop = 0;
+  }
+  function closeSettingsPage() {
+    $("settings-page").classList.add("hidden");
+    hideCtx();
+  }
+  function settingsPageOpen() { return !$("settings-page").classList.contains("hidden"); }
+  function spGroup(rows) {
+    const g = h("div", { class: "sp-group" });
+    rows.forEach(function (r) { g.appendChild(r); });
+    return g;
+  }
+  async function notifyPermission() {
+    if (!("Notification" in window)) return toast("Браузер не поддерживает уведомления");
+    const perm = await Notification.requestPermission();
+    toast(perm === "granted" ? "Уведомления включены" : "Уведомления не разрешены");
+  }
+  async function installApp() {
+    const e = S.installEvt;
+    S.installEvt = null;
+    e.prompt();
+    renderSettingsPage();
+  }
+  function logoutConfirm() {
+    confirmDlg("Выйти?", "Сессия на этом устройстве завершится.", "Выйти", async function () {
+      await sb.auth.signOut();
+      location.reload();
+    });
+  }
+  function renderSettingsPage() {
+    const p = S.profile;
+    const body = $("sp-body");
+    body.replaceChildren();
+    body.appendChild(h("div", { class: "sp-head" },
+      avEl({ seed: p.id, name: pName(p), url: p.avatar_url, animated: p.avatar_animated, size: "lg" }),
+      h("b", { text: pName(p) }),
+      h("span", { text: "@" + p.username })));
+    body.appendChild(spGroup([
+      rowBtn(rowIco(ICON.user, "#3b82f6"), "Аккаунт", "имя, о себе, статус", function () { myEditSheet(); }),
+      rowBtn(rowIco(ICON.brush, "#a855f7"), "Оформление профиля", "фон и музыка профиля", function () { profileStyleSheet(); }),
+      rowBtn(rowIco(ICON.hash, "#0ea5e9"), "Мой ID", String(p.uid || "—"), function () { copyText(String(p.uid)); })
+    ]));
+    const notifRows = [
+      rowBtn(rowIco(ICON.sticker, "#f97316"), "Стикеры", "паки, свои картинки и GIF", function () { stickerSheet(); }),
+      rowBtn(rowIco(ICON.bell, "#ef4444"), "Уведомления", "браузерные, когда приложение свёрнуто", notifyPermission)
+    ];
+    if (S.installEvt) notifRows.push(rowBtn(rowIco(ICON.install, "#22c55e"), "Установить приложение", "добавить Echo на экран", installApp));
+    body.appendChild(spGroup(notifRows));
+    if (!S.installEvt) body.appendChild(h("div", { class: "sp-hint", text: "Установка: Android — меню браузера, «Установить приложение». iPhone — Safari, «Поделиться», «На экран «Домой»»." }));
+    body.appendChild(spGroup([
+      rowBtn(rowIco(ICON.globe, "#8b5cf6"), "Язык", "Русский", function () { toast("Пока только русский"); })
+    ]));
+    body.appendChild(spGroup([
+      rowBtn(rowIco(ICON.exit, "#ef4444"), "Выйти", "из этого аккаунта на устройстве", logoutConfirm, true)
+    ]));
+  }
+  function profileStyleSheet() {
+    const p = S.profile;
+    openSheet("Оформление профиля", function (b) {
+      b.appendChild(h("div", { class: "ttl", text: "Цвет фона" }));
+      b.appendChild(h("div", { class: "sp-prev", style: { background: "linear-gradient(135deg," + ppBg(p) + ",#0f0a1d)" } }, "Фон профиля"));
+      const sw = h("div", { class: "pp-sw" });
+      PALETTE.forEach(function (c) {
+        sw.appendChild(h("button", {
+          class: "pp-dot" + (p.profile_bg === c ? " on" : ""), type: "button",
+          style: { background: c }, "aria-label": "Цвет " + c,
+          onclick: function () { setProfileBg(c); }
+        }));
+      });
+      sw.appendChild(h("input", { type: "color", class: "pp-color", value: p.profile_bg || "#5b21b6", "aria-label": "Свой цвет", onchange: function (e) { setProfileBg(e.target.value); } }));
+      b.appendChild(sw);
+      b.appendChild(h("div", { class: "ttl", text: "Музыка профиля" }));
+      if (p.music_url) b.appendChild(musicCard(p));
+      b.appendChild(h("div", { class: "hint", text: p.music_url ? "Играет, когда тебя открывают в профиле." : "Загрузи трек: он будет играть, когда тебя открывают в профиле." }));
+      b.appendChild(h("div", { class: "btn-row" },
+        btnGhost(p.music_url ? "Сменить трек" : "Выбрать трек", function () { pickFile("audio/*", uploadMusic); }),
+        p.music_url ? btnDanger("Убрать", removeMusic) : null));
+      syncMusic();
+    });
+  }
+  function refreshStyleSheet() {
+    if (!$("sheet").classList.contains("hidden") && $("sheet-title").textContent === "Оформление профиля") profileStyleSheet();
   }
 
   function ppMenu(x, y) {
@@ -1419,6 +1522,7 @@
     S.profiles.set(row.id, row);
     renderMeBtn();
     if (profilePageOpen()) renderProfilePage();
+    if (settingsPageOpen()) renderSettingsPage();
     renderSidebar();
   }
 
@@ -1438,6 +1542,7 @@
     const r = await sb.from("profiles").update({ profile_bg: c }).eq("id", S.me.id).select("*").single();
     if (r.error) return toast(errMsg(r.error));
     applySelf(r.data);
+    refreshStyleSheet();
   }
 
   async function uploadMusic(f) {
@@ -1454,7 +1559,8 @@
       const r = await sb.from("profiles").update({ music_url: url, music_title: title }).eq("id", S.me.id).select("*").single();
       if (r.error) throw r.error;
       applySelf(r.data);
-      playProfileMusic(r.data);
+      if (profilePageOpen()) playProfileMusic(r.data);
+      refreshStyleSheet();
       toast("Трек добавлен");
     } catch (e) {
       toast(errMsg(e));
@@ -1466,6 +1572,7 @@
     if (r.error) return toast(errMsg(r.error));
     applySelf(r.data);
     playProfileMusic(r.data);
+    refreshStyleSheet();
   }
 
   function myEditSheet() {
@@ -1750,35 +1857,6 @@
     });
   }
 
-  function settingsSheet() {
-    openSheet("Настройки", function (b) {
-      b.appendChild(rowBtn(avEl({ seed: S.me.id, name: pName(S.profile), url: S.profile.avatar_url, animated: S.profile.avatar_animated, size: "sm" }),
-        pName(S.profile), "@" + S.profile.username, function () { openProfilePage(S.me.id); }));
-      b.appendChild(rowBtn(icoBox(ICON.sticker), "Стикеры", "паки, свои картинки и GIF", function () { stickerSheet(); }));
-      b.appendChild(rowBtn(icoBox(ICON.bell), "Уведомления", "браузерные, когда приложение свёрнуто", async function () {
-        if (!("Notification" in window)) return toast("Браузер не поддерживает уведомления");
-        const perm = await Notification.requestPermission();
-        toast(perm === "granted" ? "Уведомления включены" : "Уведомления не разрешены");
-      }));
-      if (S.installEvt) {
-        b.appendChild(rowBtn(icoBox(ICON.install), "Установить приложение", "добавить Echo на экран", async function () {
-          const e = S.installEvt;
-          S.installEvt = null;
-          closeSheet();
-          e.prompt();
-        }));
-      } else {
-        b.appendChild(h("div", { class: "hint", text: "Установка: Android — меню браузера, «Установить приложение». iPhone — Safari, «Поделиться», «На экран Домой»." }));
-      }
-      b.appendChild(rowBtn(icoBox(ICON.exit), "Выйти", "из этого аккаунта на устройстве", function () {
-        confirmDlg("Выйти?", "Сессия на этом устройстве завершится.", "Выйти", async function () {
-          await sb.auth.signOut();
-          location.reload();
-        });
-      }, true));
-    });
-  }
-
   function connectRealtime() {
     S.typingCh = sb.channel("gg-typing", { config: { broadcast: { self: false } } });
     S.typingCh.on("broadcast", { event: "typing" }, function (msg) { onTyping(msg.payload); }).subscribe();
@@ -1879,7 +1957,7 @@
     $("auth-form").addEventListener("submit", onAuthSubmit);
     $("search").addEventListener("input", onSearchInput);
     $("me-btn").addEventListener("click", function () { openProfilePage(S.me.id); });
-    $("settings-btn").addEventListener("click", settingsSheet);
+    $("settings-btn").addEventListener("click", openSettingsPage);
     $("new-btn").addEventListener("click", newChatSheet);
     $("back-btn").addEventListener("click", closeChat);
     $("chat-open-info").addEventListener("click", function () { const c = curChat(); if (c) chatInfo(c); });
@@ -1939,12 +2017,13 @@
       inp.focus();
     });
     $("pp-back").addEventListener("click", closeProfilePage);
+    $("sp-back").addEventListener("click", closeSettingsPage);
     $("pp-scroll").addEventListener("scroll", onPpScroll, { passive: true });
     $("pp-more").addEventListener("click", function () {
       const r = $("pp-more").getBoundingClientRect();
       ppMenu(Math.max(8, r.right - 230), r.bottom + 6);
     });
-    ["play", "pause", "ended"].forEach(function (ev) { $("pp-audio").addEventListener(ev, syncMusic); });
+    ["play", "pause", "ended", "timeupdate", "loadedmetadata"].forEach(function (ev) { $("pp-audio").addEventListener(ev, syncMusic); });
     $("sheet").addEventListener("click", function (e) { if (e.target === $("sheet")) closeSheet(); });
     $("sheet-x").addEventListener("click", closeSheet);
     $("lightbox").addEventListener("click", function (e) {
@@ -1975,6 +2054,7 @@
           clear($("lightbox"));
           return;
         }
+        if (settingsPageOpen()) return closeSettingsPage();
         if (profilePageOpen()) return closeProfilePage();
         if (panelMode) return closePanel();
         if (S.open) return closeChat();
