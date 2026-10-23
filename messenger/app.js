@@ -54,6 +54,8 @@
     msg: "M4 5h16v11H9l-5 4z",
     play: "M8 5v14l11-7z",
     pause: "M7 5h4v14H7zM13 5h4v14h-4z",
+    vol: "M4 9.5v5h3.5L12 18V6L7.5 9.5H4zM15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11",
+    muted: "M4 9.5v5h3.5L12 18V6L7.5 9.5H4zM16 9l5 6M21 9l-5 6",
     note: "M9 18V6l10-2v12",
     brush: "M12 3a9 9 0 1 0 0 18c1 0 1.5-.7 1.5-1.5 0-.4-.2-.7-.4-1-.2-.3-.4-.6-.4-1 0-.8.7-1.5 1.5-1.5H16a5 5 0 0 0 5-5c0-4.4-4-8-9-8z",
     hash: "M4 9h16M4 15h16M10 4l-2 16M16 4l-2 16",
@@ -1654,13 +1656,76 @@
     return { url: m.media_url, meta: mediaName(m) || null };
   }
 
+  const THUMBS = new Map();
+
+  function durText(sec) {
+    const t = Math.max(0, Math.floor(isFinite(sec) ? sec : 0));
+    return Math.floor(t / 60) + ":" + pad2(t % 60);
+  }
+
+  function captureFrame(url) {
+    return new Promise(function (resolve, reject) {
+      const v = document.createElement("video");
+      v.muted = true;
+      v.playsInline = true;
+      v.preload = "auto";
+      if (url.indexOf("blob:") !== 0) v.crossOrigin = "anonymous";
+      v.onerror = function () { reject(new Error("thumb")); };
+      let ready = false;
+      const seekThumb = function () { v.currentTime = Math.max(0.1, Math.min(1, v.duration * 0.1)); };
+      v.onloadedmetadata = function () {
+        if (isFinite(v.duration)) { ready = true; return seekThumb(); }
+        v.currentTime = 1e101;
+      };
+      v.ontimeupdate = function () {
+        if (!ready && isFinite(v.duration)) { ready = true; seekThumb(); }
+      };
+      v.onseeked = function () {
+        if (!ready) return;
+        const w = v.videoWidth;
+        const hh = v.videoHeight;
+        if (!w || !hh) return reject(new Error("thumb"));
+        const k = Math.min(1, 640 / Math.max(w, hh));
+        const cv = document.createElement("canvas");
+        cv.width = Math.round(w * k);
+        cv.height = Math.round(hh * k);
+        cv.getContext("2d").drawImage(v, 0, 0, cv.width, cv.height);
+        cv.toBlob(function (bl) {
+          if (!bl) return reject(new Error("thumb"));
+          resolve({ url: URL.createObjectURL(bl), duration: v.duration, w: w, h: hh });
+        }, "image/jpeg", 0.82);
+      };
+      v.src = url;
+    });
+  }
+
+  function videoThumb(m) {
+    const key = m.media_url;
+    if (!THUMBS.has(key)) {
+      const p = mediaUrlOf(m).then(captureFrame).catch(function () {
+        THUMBS.delete(key);
+        return null;
+      });
+      THUMBS.set(key, p);
+    }
+    return THUMBS.get(key);
+  }
+
   function videoCard(m) {
     if (m._plock) return lockNote();
     const box = h("div", { class: "vcard", role: "button", tabindex: "0", "aria-label": "Открыть видео" });
-    if (!m._pmeta) box.appendChild(h("video", { src: m.media_url, preload: "metadata", muted: true, playsinline: true }));
-    else Object.assign(box.style, { width: "min(260px,100%)", aspectRatio: "16 / 9", background: "#120a22" });
+    const img = h("img", { class: "vthumb", alt: "" });
+    const dur = h("span", { class: "vdur" });
+    box.appendChild(img);
+    box.appendChild(dur);
     if (!m._pending) box.appendChild(h("span", { class: "vplay" }, svg(ICON.play, "vplay-ico")));
     if (m.media_quality) box.appendChild(h("span", { class: "vq", text: qualityLabel(m.media_quality) }));
+    videoThumb(m).then(function (t) {
+      if (!t) return;
+      img.src = t.url;
+      dur.textContent = durText(t.duration);
+      box.style.aspectRatio = t.w + " / " + t.h;
+    });
     box.addEventListener("click", function (e) {
       e.stopPropagation();
       openMedia(m, "video");
@@ -1680,6 +1745,90 @@
     clear($("lightbox"));
   }
 
+  function setIco(el, d) {
+    el.querySelector("path").setAttribute("d", d);
+  }
+
+  function videoPlayer(url) {
+    const v = h("video", { src: url, playsinline: true, autoplay: true, preload: "auto" });
+    const box = h("div", { class: "vp" });
+    const center = h("button", { class: "vp-center", type: "button", "aria-label": "Воспроизвести" }, svg(ICON.play, "vp-solid"));
+    const small = h("button", { class: "vp-btn", type: "button", "aria-label": "Пауза" }, svg(ICON.play, "vp-solid"));
+    const mute = h("button", { class: "vp-btn", type: "button", "aria-label": "Звук" }, svg(ICON.vol, "vp-ico"));
+    const fill = h("i", { class: "vp-fill" });
+    const knob = h("i", { class: "vp-knob" });
+    const bar = h("div", { class: "vp-bar" }, fill, knob);
+    const cur = h("span", { text: "0:00" });
+    const total = h("span", { text: "0:00" });
+    const bottom = h("div", { class: "vp-bottom" },
+      bar,
+      h("div", { class: "vp-row" }, small, h("span", { class: "vp-time" }, cur, " / ", total), h("span", { class: "vp-sp" }), mute));
+    box.appendChild(v);
+    box.appendChild(center);
+    box.appendChild(bottom);
+
+    const togglePlay = function () {
+      if (v.paused) v.play().catch(function () {});
+      else v.pause();
+    };
+    const sync = function () {
+      const d = v.duration || 0;
+      const p = d ? Math.min(1, v.currentTime / d) : 0;
+      fill.style.width = (p * 100) + "%";
+      knob.style.left = (p * 100) + "%";
+      cur.textContent = durText(v.currentTime);
+      total.textContent = durText(d);
+      setIco(small, v.paused ? ICON.play : ICON.pause);
+      setIco(center, v.paused ? ICON.play : ICON.pause);
+      setIco(mute, v.muted || v.volume === 0 ? ICON.muted : ICON.vol);
+      box.classList.toggle("paused", v.paused);
+    };
+    let idleT = null;
+    const wake = function () {
+      box.classList.remove("idle");
+      clearTimeout(idleT);
+      if (!v.paused) idleT = setTimeout(function () { box.classList.add("idle"); }, 2400);
+    };
+    box.addEventListener("pointermove", wake);
+    box.addEventListener("pointerdown", wake);
+    let fixing = false;
+    v.addEventListener("loadedmetadata", function () {
+      if (isFinite(v.duration)) return;
+      fixing = true;
+      v.currentTime = 1e101;
+    });
+    v.addEventListener("durationchange", function () {
+      if (!fixing || !isFinite(v.duration)) return;
+      fixing = false;
+      v.currentTime = 0;
+    });
+    v.addEventListener("click", togglePlay);
+    center.addEventListener("click", function (e) { e.stopPropagation(); togglePlay(); });
+    small.addEventListener("click", function (e) { e.stopPropagation(); togglePlay(); });
+    mute.addEventListener("click", function (e) { e.stopPropagation(); v.muted = !v.muted; sync(); });
+    v.addEventListener("play", function () { wake(); sync(); });
+    v.addEventListener("pause", function () { clearTimeout(idleT); box.classList.remove("idle"); sync(); });
+    ["timeupdate", "loadedmetadata", "durationchange", "volumechange", "ended"].forEach(function (ev) { v.addEventListener(ev, sync); });
+    let drag = false;
+    const seek = function (e) {
+      const r = bar.getBoundingClientRect();
+      const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+      if (v.duration) v.currentTime = x * v.duration;
+      sync();
+    };
+    bar.addEventListener("pointerdown", function (e) {
+      e.stopPropagation();
+      drag = true;
+      bar.setPointerCapture(e.pointerId);
+      seek(e);
+    });
+    bar.addEventListener("pointermove", function (e) { if (drag) seek(e); });
+    bar.addEventListener("pointerup", function () { drag = false; });
+    bar.addEventListener("pointercancel", function () { drag = false; });
+    sync();
+    return box;
+  }
+
   function lightbox(url, kind, m) {
     const lb = $("lightbox");
     clear(lb);
@@ -1690,8 +1839,8 @@
       h("button", { class: "lb-btn", type: "button", "aria-label": "Закрыть", onclick: closeLightbox }, svg(ICON.lbClose, "lb-ico")),
       h("div", { class: "lb-title" }, h("b", { text: who }), m && m.created_at ? h("small", { text: hm(m.created_at) }) : null),
       h("a", { class: "lb-btn", href: url, download: "echo-" + Date.now().toString(36) + "." + extFor(type), "aria-label": "Сохранить" }, svg(ICON.lbDownload, "lb-ico"))));
-    lb.appendChild(h("div", { class: "lb-body" },
-      isVid ? h("video", { src: url, controls: true, autoplay: true, playsinline: true }) : h("img", { src: url, alt: "" })));
+    if (isVid) lb.appendChild(h("div", { class: "lb-body lb-vid" }, videoPlayer(url)));
+    else lb.appendChild(h("div", { class: "lb-body" }, h("img", { src: url, alt: "" })));
     lb.classList.remove("hidden");
   }
 
