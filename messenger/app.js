@@ -26,6 +26,11 @@
   const MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
   const FOLDERS = [["all", "Все"], ["direct", "Личные"], ["group", "Группы"], ["channel", "Каналы"], ["unread", "Непрочитанные"]];
   const ICON = {
+    imgs: "M3 5h18v14H3zM3 16l5-5 4 4 3-3 6 6M15 9.5a1.5 1.5 0 1 0 0-.01",
+    music: "M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
+    play: "M8 5v14l11-7z",
+    lbClose: "M6 6l12 12M18 6L6 18",
+    lbDownload: "M12 4v11M7 10l5 5 5-5M5 20h14",
     reply: "M9 14L4 9l5-5M4 9h11a5 5 0 0 1 5 5v6",
     copy: "M9 9h10v12H9zM5 15V3h10",
     fwd: "M14 5l7 7-7 7M21 12H9a6 6 0 0 0-6 6",
@@ -872,12 +877,15 @@
     const meta = h("div", { class: "meta" },
       m.edited_at && !deleted ? h("span", { text: "изменено" }) : null,
       h("span", { text: hm(m.created_at) }),
-      me && !deleted ? h("span", { class: "tick" + (readAll ? " read" : ""), text: c.kind === "channel" ? "✓" : (readAll ? "✓✓" : "✓") }) : null);
+      me && !deleted && !m._pending ? h("span", { class: "tick" + (readAll ? " read" : ""), text: c.kind === "channel" ? "✓" : (readAll ? "✓✓" : "✓") }) : null);
+    if (m._pending) b.appendChild(h("div", { class: "upl" }, h("span", { class: "spin" })));
     b.appendChild(meta);
-    const rx = deleted ? null : reactsEl(m);
+    const rx = deleted || m._pending ? null : reactsEl(m);
     if (rx) b.appendChild(rx);
-    b.addEventListener("contextmenu", function (e) { e.preventDefault(); openMsgMenu(m, c, e.clientX, e.clientY); });
-    bindLongPress(b, function (x, y) { openMsgMenu(m, c, x, y); });
+    if (!m._pending) {
+      b.addEventListener("contextmenu", function (e) { e.preventDefault(); openMsgMenu(m, c, e.clientX, e.clientY); });
+      bindLongPress(b, function (x, y) { openMsgMenu(m, c, x, y); });
+    }
     row.appendChild(b);
     return row;
   }
@@ -1021,8 +1029,8 @@
     }
   }
 
-  async function sendRow(fields) {
-    const c = curChat();
+  async function sendRow(fields, pendingId, chat) {
+    const c = chat || curChat();
     if (!c) return;
     const row = Object.assign({ chat_id: c.id, sender_id: S.me.id, kind: "text", body: "" }, fields);
     if (S.replyTo) row.reply_to = S.replyTo;
@@ -1030,7 +1038,10 @@
     if (plain && c.kind === "direct") row.body = await encryptFor(c, plain);
     if (row.media_name && c.kind === "direct") row.media_name = await encryptFor(c, row.media_name);
     if (!navigator.onLine) {
-      if (row.kind !== "text") return toast("Без сети отправляется только текст");
+      if (row.kind !== "text") {
+        if (pendingId) dropPending(pendingId);
+        return toast("Без сети отправляется только текст");
+      }
       const lid = "L" + Date.now().toString(36) + rnd();
       if (window.EchoStore) await EchoStore.outboxAdd({ lid: lid, chat_id: c.id, body: row.body, reply_to: row.reply_to || null, created: Date.now() });
       S.replyTo = null;
@@ -1040,11 +1051,18 @@
     }
     const r = await sb.from("messages").insert(row).select("*").single();
     if (r.error) throw r.error;
+    if (pendingId) dropPending(pendingId, true);
     S.replyTo = null;
     renderBars();
     if (row.body !== plain) r.data._plain = plain;
     addMessage(r.data);
     scheduleChats();
+  }
+
+  function dropPending(id, quiet) {
+    const n = S.messages.length;
+    S.messages = S.messages.filter(function (x) { return x.id !== id; });
+    if (!quiet && S.messages.length !== n) renderTimeline(false);
   }
 
   function addMessage(m) {
@@ -1356,13 +1374,15 @@
     }
   }
 
-  function pickFile(accept, cb) {
+  function pickFile(accept, cb, multi) {
     const el = $("picker");
     el.accept = accept;
+    el.multiple = !!multi;
     el.value = "";
     el.onchange = function () {
-      const f = el.files && el.files[0];
-      if (f) cb(f);
+      const list = Array.from(el.files || []);
+      if (!list.length) return;
+      cb(multi ? list : list[0]);
     };
     el.click();
   }
@@ -1428,25 +1448,66 @@
     return sb.storage.from("media").getPublicUrl(path).data.publicUrl;
   }
 
-  async function handleAttach(f) {
-    const c = curChat();
-    if (!c || !canPost(c)) return;
-    const caption = $("input").value.trim();
-    if (f.type.indexOf("video/") === 0) return chooseVideoQuality(f, caption);
-    if (f.type.indexOf("audio/") === 0) return sendAudio(f, caption);
-    try {
-      toast("Загружаю…");
-      const res = await prepareAndUpload(f, "media", { maxSide: 1280, maxBytes: 20 * MB - 4096, quality: 0.86, chat: c });
-      await sendRow({ kind: "image", media_url: res.url, body: caption, media_name: res.meta });
-      $("input").value = "";
-      autosize();
-    } catch (e) {
-      toast(errMsg(e));
-    }
+  const ATTACH_MIME = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif", mp4: "video/mp4", webm: "video/webm", mp3: "audio/mpeg", m4a: "audio/mp4", ogg: "audio/ogg", wav: "audio/wav" };
+
+  function fileTitle(f) { return f.name.replace(/\.[^.]+$/, "").slice(0, 200) || "Аудио"; }
+
+  function attachTile(title, sub, d, color, fn) {
+    return h("button", { class: "attach-tile", type: "button", onclick: fn },
+      h("span", { class: "at-ico", style: { background: color } }, svg(d, "at-svg")),
+      h("b", { text: title }),
+      h("small", { text: sub }));
   }
 
-  function chooseVideoQuality(f, caption) {
-    const orig = VIDEO_ORIG.indexOf(f.type) >= 0;
+  function attachMenu() {
+    const c = curChat();
+    if (!c || !canPost(c)) return;
+    openSheet("Прикрепить", function (b) {
+      b.appendChild(h("div", { class: "attach-grid" },
+        attachTile("Галерея", "фото и видео", ICON.imgs, "#8b5cf6", function () { closeSheet(); pickGallery(); }),
+        attachTile("Музыка", "аудиофайлы", ICON.music, "#6366f1", function () { closeSheet(); pickFile("audio/*", attachFiles, true); })));
+    });
+  }
+
+  async function galleryFile(r) {
+    const src = r.webPath || window.Capacitor.convertFileSrc(r.path);
+    const blob = await (await fetch(src)).blob();
+    const name = String(r.path || src).split("?")[0];
+    const ext = (name.split(".").pop() || "").toLowerCase();
+    const type = blob.type && blob.type !== "application/octet-stream" ? blob.type : ATTACH_MIME[ext] || blob.type;
+    return new File([blob], "media." + ext, { type: type });
+  }
+
+  async function pickGallery() {
+    const Plugins = window.Capacitor && window.Capacitor.Plugins;
+    if (!Plugins || !Plugins.Camera) return pickFile("image/*,video/*", attachFiles, true);
+    let res;
+    try {
+      res = await Plugins.Camera.chooseFromGallery({ mediaType: "all", allowMultipleSelection: true, limit: 10 });
+    } catch (e) {
+      if (!/cancel/i.test(String((e && (e.message || e.code)) || ""))) toast("Галерея не открылась");
+      return;
+    }
+    const files = [];
+    for (const r of res.results || []) {
+      try { files.push(await galleryFile(r)); } catch (e) { toast("Не удалось открыть файл"); }
+    }
+    if (files.length) attachFiles(files);
+  }
+
+  async function attachFiles(files) {
+    const c = curChat();
+    if (!c || !canPost(c) || !files || !files.length) return;
+    const list = files.filter(function (f) { return /^(image|video|audio)\//.test(f.type); });
+    if (list.length < files.length) toast("Некоторые файлы не поддерживаются");
+    if (!list.length) return;
+    const videos = list.filter(function (f) { return f.type.indexOf("video/") === 0; });
+    if (!videos.length) return queueMedia(c, list, null);
+    chooseVideoQuality(videos, function (key) { queueMedia(c, list, key); });
+  }
+
+  function chooseVideoQuality(videos, done) {
+    const orig = videos.every(function (f) { return VIDEO_ORIG.indexOf(f.type) >= 0; });
     const canEncode = EchoMedia.canTranscode();
     if (!orig && !canEncode) return toast("Этот формат не поддерживается. Выбери MP4 или WebM");
     const opts = [];
@@ -1460,57 +1521,59 @@
       opts.forEach(function (o) {
         b.appendChild(rowBtn(rowIco(ICON.globe, "#8b5cf6"), o[1], o[2], function () {
           closeSheet();
-          sendVideo(f, o[0], caption);
+          done(o[0]);
         }));
       });
     });
   }
 
-  async function sendVideo(f, key, caption) {
-    const c = curChat();
-    if (!c || !canPost(c)) return;
-    try {
-      let blob = f;
-      let quality = "orig";
-      if (key !== "orig") {
-        toast("Сжимаю видео…");
-        let last = -10;
-        const out = await EchoMedia.transcode(f, Number(key), function (pr) {
-          const pct = Math.round(pr * 100);
-          if (pct - last >= 10) {
-            last = pct;
-            toast("Сжимаю видео… " + pct + "%");
-          }
-        });
-        blob = out;
-        quality = key + "p";
-      }
-      if (blob.size > 20 * MB - 4096) throw new Error("Видео больше 20 МБ, выбери качество ниже");
-      const ext = blob.type.indexOf("mp4") >= 0 ? "mp4" : "webm";
-      toast("Загружаю видео…");
-      const res = await storeBlob(blob, ext, blob.type, c, "");
-      await sendRow({ kind: "video", media_url: res.url, body: caption, media_quality: quality, media_name: res.meta });
-      $("input").value = "";
-      autosize();
-    } catch (e) {
-      toast(e && e.message === "NO_TRANSCODE" ? "Сжатие на этом устройстве не работает" : errMsg(e));
-    }
+  function addPending(c, f, caption, key) {
+    const kind = f.type.indexOf("video/") === 0 ? "video" : f.type.indexOf("audio/") === 0 ? "audio" : "image";
+    const url = URL.createObjectURL(f);
+    const m = {
+      id: "P" + Date.now().toString(36) + rnd(), chat_id: c.id, sender_id: S.me.id, kind: kind, body: caption,
+      media_url: url, _localUrl: url, _pending: true,
+      media_quality: kind === "video" && key ? (key === "orig" ? "orig" : key + "p") : null,
+      media_name: kind === "audio" ? fileTitle(f) : null,
+      created_at: new Date().toISOString(), reactions: [], reply_to: null
+    };
+    addMessage(m);
+    return m;
   }
 
-  async function sendAudio(f, caption) {
-    const c = curChat();
-    if (!c || !canPost(c)) return;
+  function queueMedia(c, list, key) {
+    const caption = $("input").value.trim();
+    $("input").value = "";
+    autosize();
+    const items = list.map(function (f, i) { return { file: f, msg: addPending(c, f, i === 0 ? caption : "", key) }; });
+    (async function () {
+      for (const it of items) await sendPending(c, it.file, it.msg, key);
+    })();
+  }
+
+  async function sendPending(c, f, m, key) {
     try {
-      if (f.size > 20 * MB - 4096) throw new Error("Аудио больше 20 МБ");
-      toast("Загружаю аудио…");
-      const ext = ((f.name.split(".").pop() || "mp3").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5)) || "mp3";
-      const title = f.name.replace(/\.[^.]+$/, "").slice(0, 200) || "Аудио";
-      const res = await storeBlob(f, ext, f.type, c, title);
-      await sendRow({ kind: "audio", media_url: res.url, body: caption, media_name: res.meta });
-      $("input").value = "";
-      autosize();
+      if (f.type.indexOf("video/") === 0) {
+        let blob = f;
+        if (key && key !== "orig") blob = await EchoMedia.transcode(f, Number(key), function () {});
+        if (blob.size > 20 * MB - 4096) throw new Error("Видео больше 20 МБ, выбери качество ниже");
+        const ext = blob.type.indexOf("mp4") >= 0 ? "mp4" : "webm";
+        const res = await storeBlob(blob, ext, blob.type, c, "");
+        await sendRow({ kind: "video", media_url: res.url, body: m.body, media_quality: m.media_quality, media_name: res.meta }, m.id, c);
+      } else if (f.type.indexOf("audio/") === 0) {
+        if (f.size > 20 * MB - 4096) throw new Error("Аудио больше 20 МБ");
+        const ext = ((f.name.split(".").pop() || "mp3").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5)) || "mp3";
+        const res = await storeBlob(f, ext, f.type, c, m.media_name);
+        await sendRow({ kind: "audio", media_url: res.url, body: m.body, media_name: res.meta }, m.id, c);
+      } else {
+        const res = await prepareAndUpload(f, "media", { maxSide: 1280, maxBytes: 20 * MB - 4096, quality: 0.86, chat: c });
+        await sendRow({ kind: "image", media_url: res.url, body: m.body, media_name: res.meta }, m.id, c);
+      }
     } catch (e) {
-      toast(errMsg(e));
+      dropPending(m.id);
+      toast(e && e.message === "NO_TRANSCODE" ? "Сжатие на этом устройстве не работает" : errMsg(e));
+    } finally {
+      URL.revokeObjectURL(m._localUrl);
     }
   }
 
@@ -1559,7 +1622,7 @@
   }
 
   function openMedia(m, kind) {
-    mediaUrlOf(m).then(function (u) { lightbox(u, kind); }, function (e) { toast(errMsg(e)); });
+    mediaUrlOf(m).then(function (u) { lightbox(u, kind, m); }, function (e) { toast(errMsg(e)); });
   }
 
   function mediaEl(m, tag, props) {
@@ -1593,9 +1656,10 @@
 
   function videoCard(m) {
     if (m._plock) return lockNote();
-    const box = h("div", { class: "vcard", role: "button", tabindex: "0", "aria-label": "Смотреть видео" });
+    const box = h("div", { class: "vcard", role: "button", tabindex: "0", "aria-label": "Открыть видео" });
     if (!m._pmeta) box.appendChild(h("video", { src: m.media_url, preload: "metadata", muted: true, playsinline: true }));
-    box.appendChild(h("span", { class: "vplay", text: "Смотреть" }));
+    else Object.assign(box.style, { width: "min(260px,100%)", aspectRatio: "16 / 9", background: "#120a22" });
+    if (!m._pending) box.appendChild(h("span", { class: "vplay" }, svg(ICON.play, "vplay-ico")));
     if (m.media_quality) box.appendChild(h("span", { class: "vq", text: qualityLabel(m.media_quality) }));
     box.addEventListener("click", function (e) {
       e.stopPropagation();
@@ -1611,10 +1675,23 @@
       mediaEl(m, "audio", { controls: true, preload: "metadata" }));
   }
 
-  function lightbox(url, kind) {
+  function closeLightbox() {
+    $("lightbox").classList.add("hidden");
+    clear($("lightbox"));
+  }
+
+  function lightbox(url, kind, m) {
     const lb = $("lightbox");
     clear(lb);
-    lb.appendChild(kind === "video" || (!kind && isVideo(url)) ? h("video", { src: url, controls: true, autoplay: true }) : h("img", { src: url, alt: "" }));
+    const isVid = kind === "video" || (!kind && isVideo(url));
+    const who = m ? (m.sender_id === S.me.id ? "Вы" : pName(S.profiles.get(m.sender_id))) : "";
+    const type = m && m._pmeta ? m._pmeta.t : (isVid ? "video/mp4" : "image/jpeg");
+    lb.appendChild(h("div", { class: "lb-top" },
+      h("button", { class: "lb-btn", type: "button", "aria-label": "Закрыть", onclick: closeLightbox }, svg(ICON.lbClose, "lb-ico")),
+      h("div", { class: "lb-title" }, h("b", { text: who }), m && m.created_at ? h("small", { text: hm(m.created_at) }) : null),
+      h("a", { class: "lb-btn", href: url, download: "echo-" + Date.now().toString(36) + "." + extFor(type), "aria-label": "Сохранить" }, svg(ICON.lbDownload, "lb-ico"))));
+    lb.appendChild(h("div", { class: "lb-body" },
+      isVid ? h("video", { src: url, controls: true, autoplay: true, playsinline: true }) : h("img", { src: url, alt: "" })));
     lb.classList.remove("hidden");
   }
 
@@ -2390,7 +2467,7 @@
     });
     $("sticker-btn").addEventListener("click", function () { togglePanel("stickers"); });
     $("smile-btn").addEventListener("click", function () { togglePanel("smiles"); });
-    $("attach-btn").addEventListener("click", function () { pickFile("image/*,video/*,audio/*", handleAttach); });
+    $("attach-btn").addEventListener("click", attachMenu);
     $("composer").addEventListener("submit", function (e) { e.preventDefault(); submitText(); });
     $("input").addEventListener("input", function () { autosize(); throttleTyping(); });
     $("input").addEventListener("keydown", function (e) {
@@ -2426,9 +2503,8 @@
     $("sheet").addEventListener("click", function (e) { if (e.target === $("sheet")) closeSheet(); });
     $("sheet-x").addEventListener("click", closeSheet);
     $("lightbox").addEventListener("click", function (e) {
-      if (e.target.tagName === "VIDEO") return;
-      $("lightbox").classList.add("hidden");
-      clear($("lightbox"));
+      if (e.target !== $("lightbox") && !e.target.classList.contains("lb-body")) return;
+      closeLightbox();
     });
     document.addEventListener("keydown", function (e) {
       if (e.key !== "Escape") return;
