@@ -37,7 +37,12 @@
     down: "M12 5v14M6 13l6 6 6-6",
     install: "M12 3v12M7 10l5 5 5-5M5 21h14",
     plus: "M12 5v14M5 12h14",
-    search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4"
+    search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4",
+    camera: "M4 7h3l2-3h6l2 3h3v12H4zM12 10a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z",
+    gear: "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM4 12h2M18 12h2M12 4v2M12 18v2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M6.3 17.7l1.4-1.4M16.3 7.7l1.4-1.4",
+    msg: "M4 5h16v11H9l-5 4z",
+    play: "M8 5v14l11-7z",
+    pause: "M7 5h4v14H7zM13 5h4v14h-4z"
   };
 
   const S = {
@@ -48,6 +53,8 @@
     typingCh: null, presCh: null, dbCh: null, installEvt: null, lastLong: 0, refreshT: null
   };
   const typingMap = new Map();
+  const PP = { uid: null };
+  const PALETTE = ["#7c3aed", "#c026d3", "#db2777", "#e11d48", "#ea580c", "#ca8a04", "#16a34a", "#0d9488", "#2563eb", "#334155"];
   let panelMode = null;
   let panelPack = null;
   let sending = false;
@@ -323,7 +330,7 @@
     const ids = mine.map(function (r) { return r.chat_id; });
     let all = [];
     if (ids.length) {
-      const r = await sb.from("chat_members").select("chat_id, user_id, role, last_read_at, profiles(id, username, display_name, bio, status_emoji, status_text, avatar_url, avatar_animated, last_seen)").in("chat_id", ids);
+      const r = await sb.from("chat_members").select("chat_id, user_id, role, last_read_at, profiles(id, uid, username, display_name, bio, status_emoji, status_text, avatar_url, avatar_animated, last_seen, profile_bg, music_url, music_title)").in("chat_id", ids);
       if (r.error) return toast(errMsg(r.error));
       all = r.data || [];
     }
@@ -432,7 +439,7 @@
   function personRow(p) {
     return h("div", {
       class: "item", onclick: function () { openDirect(p.id); },
-      oncontextmenu: function (e) { e.preventDefault(); profileSheet(p.id); }
+      oncontextmenu: function (e) { e.preventDefault(); openProfilePage(p.id); }
     },
       avEl({ seed: p.id, name: pName(p), url: p.avatar_url, animated: p.avatar_animated, online: S.online.has(p.id) }),
       h("div", { class: "item-main" },
@@ -487,6 +494,13 @@
     }
   }
 
+  function profileOr(q) {
+    const pat = "%" + q + "%";
+    let out = "username.ilike." + pat + ",display_name.ilike." + pat;
+    if (/^\d{1,12}$/.test(q)) out += ",uid.eq." + q;
+    return out;
+  }
+
   let remoteTimer = null;
   function onSearchInput() {
     S.query = $("search").value;
@@ -504,7 +518,7 @@
   }
   async function runRemote(q) {
     const pat = "%" + q + "%";
-    const pr = await sb.from("profiles").select("*").or("username.ilike." + pat + ",display_name.ilike." + pat).neq("id", S.me.id).limit(12);
+    const pr = await sb.from("profiles").select("*").or(profileOr(q)).neq("id", S.me.id).limit(12);
     const mr = await sb.from("messages").select("id, chat_id, body, created_at, sender_id").ilike("body", pat).is("deleted_at", null).order("created_at", { ascending: false }).limit(20);
     if (clean($("search").value) !== q) return;
     (pr.data || []).forEach(function (p) { S.profiles.set(p.id, Object.assign({}, S.profiles.get(p.id) || {}, p)); });
@@ -1244,23 +1258,155 @@
     return t ? h("div", { class: "profile-status", text: t }) : null;
   }
 
-  function profileSheet(uid) {
-    const p = S.profiles.get(uid);
+  function ppProfile() { return PP.uid === S.me.id ? S.profile : (S.profiles.get(PP.uid) || null); }
+  function ppBg(p) { return (p && p.profile_bg) || "#5b21b6"; }
+  function profilePageOpen() { return !$("profile-page").classList.contains("hidden"); }
+
+  function openProfilePage(uid) {
+    const p = uid === S.me.id ? S.profile : S.profiles.get(uid);
     if (!p) return;
-    openSheet("Профиль", function (b) {
-      b.appendChild(h("div", { class: "profile-head" },
-        avEl({ seed: p.id, name: pName(p), url: p.avatar_url, animated: p.avatar_animated, online: S.online.has(p.id), size: "lg" }),
-        h("div", { class: "profile-name", text: pName(p) }),
-        h("div", { class: "profile-user", text: "@" + p.username }),
-        statusNode(p),
-        p.bio ? h("div", { class: "profile-bio", text: p.bio }) : null));
-      b.appendChild(kv("Статус в сети", S.online.has(p.id) ? "в сети" : "был(а) " + agoText(p.last_seen)));
-      if (p.id !== S.me.id) b.appendChild(btnPrimary("Написать", function () { openDirect(p.id); }));
+    closeSheet();
+    hideCtx();
+    PP.uid = uid;
+    $("profile-page").classList.remove("hidden");
+    $("pp-scroll").scrollTop = 0;
+    renderProfilePage();
+    onPpScroll();
+    playProfileMusic(p);
+  }
+
+  function closeProfilePage() {
+    PP.uid = null;
+    $("profile-page").classList.add("hidden");
+    const a = $("pp-audio");
+    a.pause();
+    a.removeAttribute("src");
+    a.load();
+    hideCtx();
+    syncMusic();
+  }
+
+  function onPpScroll() {
+    const sc = Math.max(0, $("pp-scroll").scrollTop);
+    const hh = Math.max(170, 360 - sc);
+    const pr = Math.min(1, sc / 240);
+    $("pp-hero").style.height = hh + "px";
+    $("pp-body").style.marginTop = (360 - hh) + "px";
+    $("profile-page").style.setProperty("--p", pr.toFixed(3));
+  }
+
+  function pRow(label, value) {
+    return h("div", { class: "pp-row" }, h("span", { text: value }), h("small", { text: label }));
+  }
+  function actBtn(label, d, fn) {
+    return h("button", { class: "pp-act", type: "button", onclick: fn }, svg(d, "pp-act-ico"), h("span", { text: label }));
+  }
+
+  function renderProfilePage() {
+    const p = ppProfile();
+    if (!p) return;
+    const own = p.id === S.me.id;
+    const bg = ppBg(p);
+    $("profile-page").style.setProperty("--pbg", bg);
+    $("pp-hero").style.background = bg;
+    $("pp-title").textContent = pName(p);
+    const av = $("pp-av");
+    av.replaceChildren();
+    if (p.avatar_url) {
+      av.style.background = "none";
+      av.appendChild(isVideo(p.avatar_url)
+        ? h("video", { src: p.avatar_url, autoplay: true, muted: true, loop: true, playsinline: true })
+        : h("img", { src: p.avatar_url, alt: "" }));
+    } else {
+      av.style.background = "linear-gradient(135deg," + bg + ",#c026d3)";
+      av.appendChild(document.createTextNode(initial(pName(p))));
+    }
+    const online = S.online.has(p.id);
+    const body = $("pp-body");
+    body.replaceChildren();
+    body.appendChild(h("div", { class: "pp-name", text: pName(p) }));
+    body.appendChild(h("div", { class: "pp-user", text: "@" + p.username }));
+    body.appendChild(h("div", { class: "pp-seen" + (online ? " on" : ""), text: online ? "в сети" : "был(а) " + agoText(p.last_seen) }));
+    const st = statusNode(p);
+    if (st) body.appendChild(st);
+    const acts = own
+      ? [actBtn("Фото", ICON.camera, function () { pickFile("image/*,video/mp4,video/webm", changeAvatar); }),
+         actBtn("Изменить", ICON.edit, myEditSheet),
+         actBtn("Настройки", ICON.gear, settingsSheet)]
+      : [actBtn("Написать", ICON.msg, function () { openDirect(p.id); }),
+         actBtn("Скопировать ID", ICON.copy, function () { copyText(String(p.uid)); })];
+    body.appendChild(h("div", { class: "pp-acts" }, acts));
+    if (p.music_url) body.appendChild(musicCard(p));
+    const info = h("div", { class: "pp-card" });
+    if (p.bio) info.appendChild(pRow("О себе", p.bio));
+    info.appendChild(pRow("Имя пользователя", "@" + p.username));
+    info.appendChild(pRow("ID", String(p.uid || "—")));
+    info.appendChild(pRow("Статус", online ? "в сети" : "был(а) " + agoText(p.last_seen)));
+    body.appendChild(info);
+    if (own) {
+      const deco = h("div", { class: "pp-card" });
+      deco.appendChild(h("div", { class: "pp-card-t", text: "Цвет фона" }));
+      const sw = h("div", { class: "pp-sw" });
+      PALETTE.forEach(function (c) {
+        sw.appendChild(h("button", {
+          class: "pp-dot" + (p.profile_bg === c ? " on" : ""), type: "button",
+          style: { background: c }, "aria-label": "Цвет " + c,
+          onclick: function () { setProfileBg(c); }
+        }));
+      });
+      sw.appendChild(h("input", { type: "color", class: "pp-color", value: p.profile_bg || "#5b21b6", "aria-label": "Свой цвет", onchange: function (e) { setProfileBg(e.target.value); } }));
+      deco.appendChild(sw);
+      deco.appendChild(h("div", { class: "pp-card-t", text: "Музыка профиля" }));
+      deco.appendChild(h("div", { class: "pp-hint", text: p.music_url ? "Играет, когда тебя открывают. Сейчас: " + (p.music_title || "трек") : "Загрузи свой трек: он будет играть, когда тебя открывают." }));
+      deco.appendChild(h("div", { class: "pp-mrow" },
+        btnGhost(p.music_url ? "Сменить трек" : "Выбрать трек", function () { pickFile("audio/*", uploadMusic); }),
+        p.music_url ? btnDanger("Убрать", removeMusic) : null));
+      body.appendChild(deco);
+    }
+    syncMusic();
+  }
+
+  function musicCard(p) {
+    return h("div", { class: "pp-music" },
+      h("button", { class: "pp-play", type: "button", "aria-label": "Играть или пауза", onclick: toggleMusic }),
+      h("div", { class: "pp-m-main" }, h("b", { text: p.music_title || "Трек" }), h("span", { text: "Музыка профиля" })));
+  }
+  function syncMusic() {
+    const a = $("pp-audio");
+    document.querySelectorAll(".pp-play").forEach(function (b) {
+      b.replaceChildren(svg(a.paused ? ICON.play : ICON.pause, "pp-play-ico"));
     });
+  }
+  function toggleMusic() {
+    const a = $("pp-audio");
+    if (a.paused) a.play().catch(function () { toast("Нажми ещё раз, чтобы включить музыку"); });
+    else a.pause();
+  }
+  function playProfileMusic(p) {
+    const a = $("pp-audio");
+    a.pause();
+    if (!p || !p.music_url) {
+      a.removeAttribute("src");
+      a.load();
+      syncMusic();
+      return;
+    }
+    a.src = p.music_url;
+    a.play().catch(function () { syncMusic(); });
+    syncMusic();
+  }
+
+  function ppMenu(x, y) {
+    const p = ppProfile();
+    if (!p) return;
+    const items = [mi("Скопировать ID", ICON.copy, function () { copyText(String(p.uid)); })];
+    if (p.id !== S.me.id) items.push(mi("Написать", ICON.msg, function () { openDirect(p.id); }));
+    showCtx(x, y, items);
   }
 
   async function openDirect(uid) {
     closeSheet();
+    closeProfilePage();
     const r = await sb.rpc("open_direct", { other: uid });
     if (r.error) return toast(errMsg(r.error));
     await loadChats();
@@ -1268,34 +1414,70 @@
     openChat(r.data);
   }
 
-  function myProfileSheet() {
+  function applySelf(row) {
+    S.profile = row;
+    S.profiles.set(row.id, row);
+    renderMeBtn();
+    if (profilePageOpen()) renderProfilePage();
+    renderSidebar();
+  }
+
+  async function changeAvatar(f) {
+    try {
+      toast("Загружаю…");
+      const res = await prepareAndUpload(f, "avatar", { maxSide: 1080, maxBytes: 6 * MB, quality: 0.9 });
+      const r = await sb.from("profiles").update({ avatar_url: res.url, avatar_animated: res.animated }).eq("id", S.me.id).select("*").single();
+      if (r.error) throw r.error;
+      applySelf(r.data);
+    } catch (e) {
+      toast(errMsg(e));
+    }
+  }
+
+  async function setProfileBg(c) {
+    const r = await sb.from("profiles").update({ profile_bg: c }).eq("id", S.me.id).select("*").single();
+    if (r.error) return toast(errMsg(r.error));
+    applySelf(r.data);
+  }
+
+  async function uploadMusic(f) {
+    if (!f.type || f.type.indexOf("audio/") !== 0) return toast("Нужен аудиофайл");
+    if (f.size > 15 * MB) return toast("Трек больше 15 МБ");
+    try {
+      toast("Загружаю трек…");
+      const ext = ((f.name.split(".").pop() || "mp3").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5)) || "mp3";
+      const path = S.me.id + "/music/" + Date.now().toString(36) + rnd() + "." + ext;
+      const up = await sb.storage.from("media").upload(path, f, { contentType: f.type, upsert: false });
+      if (up.error) throw up.error;
+      const url = sb.storage.from("media").getPublicUrl(path).data.publicUrl;
+      const title = f.name.replace(/\.[^.]+$/, "").slice(0, 80) || "Трек";
+      const r = await sb.from("profiles").update({ music_url: url, music_title: title }).eq("id", S.me.id).select("*").single();
+      if (r.error) throw r.error;
+      applySelf(r.data);
+      playProfileMusic(r.data);
+      toast("Трек добавлен");
+    } catch (e) {
+      toast(errMsg(e));
+    }
+  }
+
+  async function removeMusic() {
+    const r = await sb.from("profiles").update({ music_url: null, music_title: "" }).eq("id", S.me.id).select("*").single();
+    if (r.error) return toast(errMsg(r.error));
+    applySelf(r.data);
+    playProfileMusic(r.data);
+  }
+
+  function myEditSheet() {
     const p = S.profile;
-    openSheet("Мой профиль", function (b) {
-      const av = avEl({ seed: p.id, name: pName(p), url: p.avatar_url, animated: p.avatar_animated, size: "lg" });
-      b.appendChild(h("div", { class: "profile-head" }, av,
-        btnGhost("Сменить фото или GIF", function () {
-          pickFile("image/*,video/mp4,video/webm", async function (f) {
-            try {
-              toast("Загружаю…");
-              const res = await prepareAndUpload(f, "avatar", { maxSide: 512, maxBytes: 6 * MB, quality: 0.9 });
-              const r = await sb.from("profiles").update({ avatar_url: res.url, avatar_animated: res.animated }).eq("id", p.id).select("*").single();
-              if (r.error) throw r.error;
-              S.profile = r.data;
-              S.profiles.set(p.id, r.data);
-              renderMeBtn();
-              myProfileSheet();
-            } catch (e) {
-              toast(errMsg(e));
-            }
-          });
-        })));
+    openSheet("Изменить профиль", function (b) {
       const dn = h("input", { type: "text", maxlength: 64, value: p.display_name || "" });
       const un = h("input", { type: "text", value: "@" + p.username, disabled: true });
       const bio = h("textarea", { maxlength: 280 }, p.bio || "");
       const se = h("input", { type: "text", maxlength: 8, value: p.status_emoji || "", placeholder: "например, ^_^" });
       const st = h("input", { type: "text", maxlength: 80, value: p.status_text || "", placeholder: "Например: на работе до 18:00" });
       b.appendChild(h("label", { class: "lab" }, "Имя", dn));
-      b.appendChild(h("label", { class: "lab" }, "Username (меняется только логин, поэтому фиксирован)", un));
+      b.appendChild(h("label", { class: "lab" }, "Username (логин, поэтому фиксирован)", un));
       b.appendChild(h("label", { class: "lab" }, "О себе", bio));
       b.appendChild(h("div", { class: "ttl", text: "Статус" }));
       b.appendChild(h("label", { class: "lab" }, "Значок статуса", se));
@@ -1309,10 +1491,7 @@
         };
         const r = await sb.from("profiles").update(patch).eq("id", p.id).select("*").single();
         if (r.error) return toast(errMsg(r.error));
-        S.profile = r.data;
-        S.profiles.set(p.id, r.data);
-        renderMeBtn();
-        renderSidebar();
+        applySelf(r.data);
         closeSheet();
         toast("Профиль сохранён");
       })));
@@ -1331,10 +1510,10 @@
         const q = clean(input.value);
         clear(res);
         if (!q) return;
-        const r = await sb.from("profiles").select("*").or("username.ilike.%" + q + "%,display_name.ilike.%" + q + "%").neq("id", S.me.id).limit(15);
+        const r = await sb.from("profiles").select("*").or(profileOr(q)).neq("id", S.me.id).limit(15);
         (r.data || []).forEach(function (p) {
           S.profiles.set(p.id, Object.assign({}, S.profiles.get(p.id) || {}, p));
-          res.appendChild(rowBtn(avEl({ seed: p.id, name: pName(p), url: p.avatar_url, animated: p.avatar_animated, size: "sm" }), pName(p), "@" + p.username, function () { onPick(p); }));
+          res.appendChild(rowBtn(avEl({ seed: p.id, name: pName(p), url: p.avatar_url, animated: p.avatar_animated, size: "sm" }), pName(p), "@" + p.username + " · ID " + p.uid, function () { onPick(p); }));
         });
         if (!res.children.length) res.appendChild(emptyNote("Никого не нашли"));
       }, 260);
@@ -1370,10 +1549,10 @@
         });
       }
       peopleSearchBox(b, function (p) { picked.set(p.id, p); redraw(); });
+      b.appendChild(h("div", { class: "hint", text: "Участников можно не добавлять: получится группа только с тобой, удобно для заметок." }));
       b.appendChild(h("div", { class: "btn-row" }, btnPrimary("Создать группу", async function () {
         const t = title.value.trim();
         if (!t) return toast("Введи название");
-        if (!picked.size) return toast("Добавь хотя бы одного участника");
         const r = await sb.rpc("create_chat", { p_kind: "group", p_title: t, p_description: "", p_members: Array.from(picked.keys()) });
         if (r.error) return toast(errMsg(r.error));
         closeSheet();
@@ -1405,7 +1584,7 @@
   function chatInfo(c) {
     if (c.kind === "direct") {
       const p = profileOf(c);
-      if (p) profileSheet(p.id);
+      if (p) openProfilePage(p.id);
       return;
     }
     const isAdmin = c.role === "owner" || c.role === "admin";
@@ -1445,7 +1624,7 @@
         if (!p) return;
         const roleText = mem.role === "owner" ? "владелец" : mem.role === "admin" ? "админ" : "участник";
         b.appendChild(rowBtn(avEl({ seed: p.id, name: pName(p), url: p.avatar_url, animated: p.avatar_animated, online: S.online.has(p.id), size: "sm" }),
-          pName(p) + (mem.user_id === S.me.id ? " (вы)" : ""), roleText, function () { profileSheet(p.id); }));
+          pName(p) + (mem.user_id === S.me.id ? " (вы)" : ""), roleText, function () { openProfilePage(p.id); }));
       });
       if (isAdmin) {
         const add = h("input", { type: "text", placeholder: "Добавить по username" });
@@ -1574,7 +1753,7 @@
   function settingsSheet() {
     openSheet("Настройки", function (b) {
       b.appendChild(rowBtn(avEl({ seed: S.me.id, name: pName(S.profile), url: S.profile.avatar_url, animated: S.profile.avatar_animated, size: "sm" }),
-        pName(S.profile), "@" + S.profile.username, function () { myProfileSheet(); }));
+        pName(S.profile), "@" + S.profile.username, function () { openProfilePage(S.me.id); }));
       b.appendChild(rowBtn(icoBox(ICON.sticker), "Стикеры", "паки, свои картинки и GIF", function () { stickerSheet(); }));
       b.appendChild(rowBtn(icoBox(ICON.bell), "Уведомления", "браузерные, когда приложение свёрнуто", async function () {
         if (!("Notification" in window)) return toast("Браузер не поддерживает уведомления");
@@ -1676,7 +1855,7 @@
     const rec = p.new;
     if (!rec || !rec.id) return;
     const prev = S.profiles.get(rec.id) || {};
-    const keys = ["display_name", "username", "avatar_url", "avatar_animated", "status_emoji", "status_text", "bio"];
+    const keys = ["display_name", "username", "avatar_url", "avatar_animated", "status_emoji", "status_text", "bio", "profile_bg", "music_url", "music_title"];
     const changed = keys.some(function (k) { return prev[k] !== rec[k]; });
     S.profiles.set(rec.id, Object.assign({}, prev, rec));
     if (rec.id === S.me.id) {
@@ -1684,6 +1863,7 @@
       renderMeBtn();
     }
     if (changed) {
+      if (profilePageOpen() && PP.uid === rec.id) renderProfilePage();
       renderSidebar();
       if (S.open) {
         renderHeader();
@@ -1698,7 +1878,7 @@
     });
     $("auth-form").addEventListener("submit", onAuthSubmit);
     $("search").addEventListener("input", onSearchInput);
-    $("me-btn").addEventListener("click", myProfileSheet);
+    $("me-btn").addEventListener("click", function () { openProfilePage(S.me.id); });
     $("settings-btn").addEventListener("click", settingsSheet);
     $("new-btn").addEventListener("click", newChatSheet);
     $("back-btn").addEventListener("click", closeChat);
@@ -1749,6 +1929,22 @@
         renderBars();
       }
     });
+    $("a-eye").addEventListener("click", function () {
+      const inp = $("a-pass");
+      const show = inp.type === "password";
+      inp.type = show ? "text" : "password";
+      $("a-eye").querySelector(".ey-open").classList.toggle("hidden", show);
+      $("a-eye").querySelector(".ey-off").classList.toggle("hidden", !show);
+      $("a-eye").setAttribute("aria-label", show ? "Скрыть пароль" : "Показать пароль");
+      inp.focus();
+    });
+    $("pp-back").addEventListener("click", closeProfilePage);
+    $("pp-scroll").addEventListener("scroll", onPpScroll, { passive: true });
+    $("pp-more").addEventListener("click", function () {
+      const r = $("pp-more").getBoundingClientRect();
+      ppMenu(Math.max(8, r.right - 230), r.bottom + 6);
+    });
+    ["play", "pause", "ended"].forEach(function (ev) { $("pp-audio").addEventListener(ev, syncMusic); });
     $("sheet").addEventListener("click", function (e) { if (e.target === $("sheet")) closeSheet(); });
     $("sheet-x").addEventListener("click", closeSheet);
     $("lightbox").addEventListener("click", function (e) {
@@ -1779,6 +1975,7 @@
           clear($("lightbox"));
           return;
         }
+        if (profilePageOpen()) return closeProfilePage();
         if (panelMode) return closePanel();
         if (S.open) return closeChat();
         CapApp.exitApp();
