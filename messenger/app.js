@@ -1520,7 +1520,9 @@
         const cv = document.createElement("canvas");
         cv.width = Math.max(1, Math.round(img.naturalWidth * k));
         cv.height = Math.max(1, Math.round(img.naturalHeight * k));
-        cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+        const ctx = cv.getContext("2d");
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(img, 0, 0, cv.width, cv.height);
         cv.toBlob(function (b) {
           URL.revokeObjectURL(url);
           if (b) resolve(b);
@@ -2326,7 +2328,7 @@
   async function changeAvatar(f) {
     try {
       toast("Загружаю…");
-      const res = await prepareAndUpload(f, "avatar", { maxSide: 1080, maxBytes: 6 * MB, quality: 0.9 });
+      const res = await prepareAndUpload(f, "avatar", { maxSide: 1440, maxBytes: 6 * MB, quality: 0.92 });
       const r = await sb.from("profiles").update({ avatar_url: res.url, avatar_animated: res.animated }).eq("id", S.me.id).select("*").single();
       if (r.error) throw r.error;
       applySelf(r.data);
