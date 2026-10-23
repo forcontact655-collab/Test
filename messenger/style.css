@@ -269,7 +269,7 @@ img,video{display:block}
 .pw-eye{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:40px;height:40px;border-radius:12px;display:grid;place-items:center;color:var(--muted)}
 .pw-eye:hover{color:var(--text);background:rgba(167,139,250,.12)}
 .pw-eye svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
-.pp{position:fixed;inset:0;z-index:40;overflow:hidden;background:linear-gradient(180deg,var(--pbg,#5b21b6) 0%,#0f0a1d 520px);animation:ppIn .4s var(--ease) both}
+.pp{position:fixed;inset:0;z-index:40;overflow:hidden;background:var(--pbg,#5b21b6);animation:ppIn .4s var(--ease) both}
 .pp.hidden{display:none}
 @keyframes ppIn{from{transform:translateX(28px);opacity:0}to{transform:none;opacity:1}}
 .pp-scroll{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:none}
@@ -379,7 +379,7 @@ img,video{display:block}
 .lb-body{flex:1;min-height:0;display:grid;place-items:center;padding:4px 10px 18px}
 .lb-body img,.lb-body video{max-width:100%;max-height:100%;border-radius:14px;object-fit:contain;animation:sheetIn .3s var(--ease)}
 .pp-body{min-height:calc(100% + 60px)}
-.vcard{width:min(320px,100%);aspect-ratio:16 / 10;background:linear-gradient(135deg,#2a1656,#4c1d95 55%,#7e22ce);border-radius:14px;overflow:hidden}
+.vcard{width:min(280px,70vw);aspect-ratio:16 / 10;background:linear-gradient(135deg,#2a1656,#4c1d95 55%,#7e22ce);border-radius:14px;overflow:hidden}
 .vthumb{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
 .vdur{position:absolute;left:8px;bottom:8px;padding:2px 8px;border-radius:999px;background:rgba(15,10,29,.72);color:#fff;font-size:12px;font-variant-numeric:tabular-nums}
 .vdur:empty{display:none}
@@ -403,4 +403,7 @@ img,video{display:block}
 .vp-btn:hover{background:rgba(255,255,255,.1)}
 .vp-ico{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .vp-solid{width:22px;height:22px;fill:currentColor;stroke:none}
-
+.pp-hero::after{display:none}
+.pp-body{text-align:center}
+.pp-card,.pp-music{text-align:left}
+.profile-status{display:inline-block}
