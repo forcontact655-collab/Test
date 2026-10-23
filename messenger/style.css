@@ -86,6 +86,7 @@ img,video{display:block}
 .pv b{font-weight:600;color:#d8ccff}
 .badge{flex:none;min-width:21px;height:21px;padding:0 6px;border-radius:11px;background:var(--grad);color:#fff;font-size:12px;font-weight:700;display:grid;place-items:center;animation:pop .35s var(--ease)}
 .badge.mute{background:#4b4370}
+.badge.still,.item.still{animation:none}
 .mico{flex:none;width:14px;height:14px;fill:none;stroke:var(--dim);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .mico.pin{stroke:var(--acc)}
 .empty-note{padding:26px 16px;text-align:center;color:var(--dim);font-size:14px;line-height:1.5}
