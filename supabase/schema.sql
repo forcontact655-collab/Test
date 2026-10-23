@@ -369,3 +369,16 @@ end $$;
 
 revoke all on function public.set_username(text) from public, anon;
 grant execute on function public.set_username(text) to authenticated;
+
+-- Резервная копия приватного ключа шифрования личных чатов (видна только владельцу)
+create table if not exists public.user_keys (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  pub text not null,
+  priv_pkcs8 text not null,
+  updated_at timestamptz not null default now()
+);
+alter table public.user_keys enable row level security;
+drop policy if exists user_keys_own on public.user_keys;
+create policy user_keys_own on public.user_keys for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+revoke all on public.user_keys from anon, authenticated;
+grant select, insert, update, delete on public.user_keys to authenticated;

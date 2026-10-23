@@ -17,10 +17,16 @@
     for (var i = 0; i < s.length; i++) b[i] = s.charCodeAt(i);
     return b;
   }
+  // Ключ создаётся экспортируемым, чтобы его можно было сохранить в резервную копию на сервере.
+  // Локально он потом импортируется заново как неэкспортируемый.
   async function generate() {
-    var kp = await subtle.generateKey(CURVE, false, ["deriveBits"]);
+    var kp = await subtle.generateKey(CURVE, true, ["deriveBits"]);
     var pub = await subtle.exportKey("raw", kp.publicKey);
-    return { privateKey: kp.privateKey, publicKey: b64(pub) };
+    var priv = await subtle.exportKey("pkcs8", kp.privateKey);
+    return { privateKey: await importPriv(b64(priv)), publicKey: b64(pub), privB64: b64(priv) };
+  }
+  async function importPriv(privB64) {
+    return subtle.importKey("pkcs8", unb64(privB64), CURVE, false, ["deriveBits"]);
   }
   async function deriveChatKey(privateKey, peerPublicB64) {
     var peer = await subtle.importKey("raw", unb64(peerPublicB64), CURVE, true, []);
@@ -61,5 +67,5 @@
     const key = await subtle.importKey("raw", unb64(keyB64), { name: "AES-GCM" }, false, ["decrypt"]);
     return subtle.decrypt({ name: "AES-GCM", iv: unb64(ivB64) }, key, buf);
   }
-  root.EchoE2E = { generate: generate, deriveChatKey: deriveChatKey, encrypt: encrypt, decrypt: decrypt, isEncrypted: isEncrypted, encryptBytes: encryptBytes, decryptBytes: decryptBytes, PREFIX: PREFIX };
+  root.EchoE2E = { generate: generate, importPriv: importPriv, deriveChatKey: deriveChatKey, encrypt: encrypt, decrypt: decrypt, isEncrypted: isEncrypted, encryptBytes: encryptBytes, decryptBytes: decryptBytes, PREFIX: PREFIX };
 })(typeof window !== "undefined" ? window : globalThis);
