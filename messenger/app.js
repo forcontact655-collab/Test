@@ -3,7 +3,6 @@
 
   const SUPA_URL = "https://ceqahqbrvgqdcjxgzjxk.supabase.co";
   const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNlcWFocWJydmdxZGNqeGd6anhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI3MDgzMDMsImV4cCI6MjEwODI4NDMwM30.ZRngDLbZeqysidVxsXU_S4I1GxfsAXmftHQsRvWQLsQ";
-  const DOMAIN = "gemgram.app";
   const MB = 1024 * 1024;
   const EDIT_MS = 48 * 3600 * 1000;
   const REACTS = ["👍", "❤️", "🔥", "😂", "😮", "😢", "🙏", "🎉"];
@@ -127,7 +126,10 @@
 
   function errMsg(e) {
     const m = String((e && (e.message || e.error_description)) || e || "");
-    if (/Invalid login/i.test(m)) return "Неверный username или пароль";
+    if (/username_taken/i.test(m)) return "Такой username уже занят";
+    if (/username_invalid/i.test(m)) return "Username: 3–32 символа, латиница, цифры и _";
+    if (/username_change_requires_google/i.test(m)) return "Сменить username можно только с привязанным Google";
+    if (/manual.?link/i.test(m)) return "Привязка Google пока не включена на сервере";
     if (/over_email_send_rate_limit|rate limit|too many|for security purposes/i.test(m)) return "Слишком часто. Подожди немного и попробуй снова";
     if (/otp_expired|expired|invalid.*(otp|token)|token.*invalid/i.test(m)) return "Код неверный или устарел. Запроси новый";
     if (/already registered|already been registered|User already|занят/i.test(m)) return "Такой username уже занят";
@@ -150,7 +152,14 @@
   function nameColor(seed) { return NAME_COLORS[hash(seed) % NAME_COLORS.length]; }
   function isVideo(url) { return /\.(mp4|webm)(\?|$)/i.test(url || ""); }
   function initial(name) { return (String(name || "?").trim().charAt(0) || "?").toUpperCase(); }
-  function pName(p) { return p ? (p.display_name || "@" + p.username) : "Неизвестно"; }
+  function pName(p) { return p ? (p.display_name || (p.username ? "@" + p.username : "Пользователь")) : "Неизвестно"; }
+  function uTag(p) { return p && p.username ? "@" + p.username : ""; }
+  function googleLinked(u) { return !!u && (u.identities || []).some(function (i) { return i.provider === "google"; }); }
+  function linkGoogle() {
+    sb.auth.linkIdentity({ provider: "google", options: { redirectTo: location.origin + location.pathname } }).then(function (r) {
+      if (r.error) toast(errMsg(r.error));
+    });
+  }
   function clean(q) { return String(q || "").replace(/[^\p{L}\p{N}_ ]/gu, "").trim(); }
 
   function hm(iso) { const d = new Date(iso); return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); }
@@ -254,104 +263,6 @@
     setTimeout(function () { b.classList.add("hidden"); }, 400);
   }
 
-  function setAuthMode(m) {
-    authMode = m;
-    document.querySelectorAll("#auth-seg .seg-btn").forEach(function (b) { b.classList.toggle("on", b.dataset.mode === m); });
-    $("auth-seg").classList.toggle("right", m === "register");
-    document.querySelectorAll(".reg-only").forEach(function (el) { el.classList.toggle("hidden", m !== "register"); });
-    $("a-submit").textContent = m === "login" ? "Войти" : "Создать аккаунт";
-    $("a-pass").setAttribute("autocomplete", m === "login" ? "current-password" : "new-password");
-  }
-
-  async function onAuthSubmit(e) {
-    e.preventDefault();
-    const btn = $("a-submit");
-    const u = $("a-user").value.trim().toLowerCase();
-    const p = $("a-pass").value;
-    if (!/^[a-z0-9_]{3,32}$/.test(u)) return toast("Username: 3–32 символа, латиница, цифры и _");
-    if (p.length < 6) return toast("Пароль — минимум 6 символов");
-    btn.disabled = true;
-    try {
-      const email = u + "@" + DOMAIN;
-      if (authMode === "login") {
-        const r = await sb.auth.signInWithPassword({ email: email, password: p });
-        if (r.error) throw r.error;
-        await enter(r.data.user);
-      } else {
-        const dn = $("a-name").value.trim() || u;
-        const free = await sb.rpc("username_available", { u: u });
-        if (free.error) throw free.error;
-        if (free.data !== true) throw new Error("занят");
-        const r = await sb.auth.signUp({ email: email, password: p, options: { data: { username: u, display_name: dn } } });
-        if (r.error) throw r.error;
-        if (r.data.session) await enter(r.data.user);
-        else {
-          const r2 = await sb.auth.signInWithPassword({ email: email, password: p });
-          if (r2.error) throw r2.error;
-          await enter(r2.data.user);
-        }
-      }
-    } catch (err) {
-      toast(errMsg(err));
-    } finally {
-      btn.disabled = false;
-    }
-  }
-
-  function isEmail(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
-  function realEmail(e) { return !!e && !/@gemgram\.app$/i.test(e); }
-  let otpEmail = "";
-  let otpTick = null;
-  function otpCooldown(sec) {
-    clearInterval(otpTick);
-    const btn = $("o-resend");
-    let left = sec;
-    btn.disabled = true;
-    btn.textContent = "Отправить снова (" + left + ")";
-    otpTick = setInterval(function () {
-      left -= 1;
-      if (left <= 0) {
-        clearInterval(otpTick);
-        btn.disabled = false;
-        btn.textContent = "Отправить снова";
-      } else {
-        btn.textContent = "Отправить снова (" + left + ")";
-      }
-    }, 1000);
-  }
-  async function sendOtp(email) {
-    const r = await sb.auth.signInWithOtp({ email: email, options: { shouldCreateUser: true } });
-    if (r.error) throw r.error;
-  }
-  function showOtpStep(step) {
-    $("otp-email-form").classList.toggle("hidden", step !== "email");
-    $("otp-code-form").classList.toggle("hidden", step !== "code");
-  }
-  function toggleLegacy(on) {
-    $("legacy-wrap").classList.toggle("hidden", !on);
-    $("otp-email-form").classList.toggle("hidden", on);
-    $("otp-code-form").classList.add("hidden");
-    $("legacy-toggle").textContent = on ? "← Вход по почте" : "Войти по логину и паролю";
-  }
-  async function onOtpSend(e) {
-    e.preventDefault();
-    const email = $("o-email").value.trim().toLowerCase();
-    if (!isEmail(email)) return toast("Введи почту");
-    $("o-send").disabled = true;
-    try {
-      await sendOtp(email);
-      otpEmail = email;
-      $("o-sent-to").textContent = "Код отправлен на " + email + ". Введи 6 цифр из письма.";
-      $("o-code").value = "";
-      showOtpStep("code");
-      otpCooldown(30);
-      setTimeout(function () { $("o-code").focus(); }, 80);
-    } catch (err) {
-      toast(errMsg(err));
-    } finally {
-      $("o-send").disabled = false;
-    }
-  }
   async function onGoogleLogin() {
     const btn = $("g-login");
     btn.disabled = true;
@@ -363,43 +274,6 @@
       btn.disabled = false;
     }
   }
-  async function onOtpResend() {
-    if (!otpEmail) return showOtpStep("email");
-    $("o-resend").disabled = true;
-    try {
-      await sendOtp(otpEmail);
-      toast("Код отправлен снова");
-      otpCooldown(30);
-    } catch (err) {
-      toast(errMsg(err));
-      $("o-resend").disabled = false;
-    }
-  }
-  function onOtpBack() {
-    clearInterval(otpTick);
-    $("o-resend").disabled = false;
-    $("o-resend").textContent = "Отправить снова";
-    showOtpStep("email");
-  }
-  async function onOtpVerify(e) {
-    e.preventDefault();
-    const token = $("o-code").value.trim();
-    if (!/^\d{6}$/.test(token)) return toast("Код — 6 цифр");
-    $("o-verify").disabled = true;
-    try {
-      const r = await sb.auth.verifyOtp({ email: otpEmail, token: token, type: "email" });
-      if (r.error) throw r.error;
-      const ens = await sb.rpc("ensure_profile");
-      if (ens.error) throw ens.error;
-      clearInterval(otpTick);
-      await enter(r.data.user);
-    } catch (err) {
-      toast(errMsg(err));
-    } finally {
-      $("o-verify").disabled = false;
-    }
-  }
-
   async function enter(user) {
     if (S.entered) return;
     S.entered = true;
@@ -738,7 +612,7 @@
       avEl({ seed: p.id, name: pName(p), url: p.avatar_url, animated: p.avatar_animated, online: isOn(p.id) }),
       h("div", { class: "item-main" },
         h("div", { class: "row1" }, h("span", { class: "nm", text: pName(p) })),
-        h("div", { class: "row2" }, h("span", { class: "pv", text: "@" + p.username }))));
+        h("div", { class: "row2" }, h("span", { class: "pv", text: uTag(p) }))));
   }
 
   function msgHit(m) {
@@ -2057,7 +1931,7 @@
     const over = $("pp-over");
     over.replaceChildren();
     over.appendChild(h("div", { class: "pp-name", text: pName(p) }));
-    over.appendChild(h("div", { class: "pp-user", text: "@" + p.username }));
+    if (p.username) over.appendChild(h("div", { class: "pp-user", text: "@" + p.username }));
     over.appendChild(h("div", { class: "pp-seen" + (online ? " on" : ""), text: online ? "в сети" : "был(а) " + agoText(p.last_seen) }));
     const st = statusNode(p);
     if (st) over.appendChild(st);
@@ -2071,7 +1945,7 @@
     if (p.music_url) body.appendChild(musicCard(p));
     const info = h("div", { class: "pp-card" });
     if (p.bio) info.appendChild(pRow("О себе", p.bio));
-    info.appendChild(pRow("Имя пользователя", "@" + p.username));
+    info.appendChild(pRow("Имя пользователя", p.username ? "@" + p.username : "не задан"));
     info.appendChild(pRow("ID", String(p.uid || "—")));
     info.appendChild(pRow("Статус", online ? "в сети" : "был(а) " + agoText(p.last_seen)));
     body.appendChild(info);
@@ -2179,10 +2053,10 @@
     body.appendChild(h("div", { class: "sp-head" },
       avEl({ seed: p.id, name: pName(p), url: p.avatar_url, animated: p.avatar_animated, size: "lg" }),
       h("b", { text: pName(p) }),
-      h("span", { text: "@" + p.username })));
+      h("span", { text: uTag(p) })));
     body.appendChild(spGroup([
       rowBtn(rowIco(ICON.user, "#3b82f6"), "Аккаунт", "имя, о себе, статус", function () { myEditSheet(); }),
-      rowBtn(rowIco(ICON.mail, "#60a5fa"), "Почта", realEmail(S.me && S.me.email) ? S.me.email : "не привязана, нужна для входа по коду", function () { emailSheet(); }),
+      rowBtn(rowIco(ICON.user, "#4285f4"), "Google", googleLinked(S.me) ? "привязан" : "не привязан, нажми, чтобы привязать", function () { if (googleLinked(S.me)) toast("Google уже привязан"); else linkGoogle(); }),
       rowBtn(rowIco(ICON.brush, "#a855f7"), "Оформление профиля", "фон и музыка профиля", function () { profileStyleSheet(); }),
       rowBtn(rowIco(ICON.hash, "#0ea5e9"), "Мой ID", String(p.uid || "—"), function () { copyText(String(p.uid)); }),
       rowBtn(rowIco(ICON.lock, "#10b981"), "Шифрование личных чатов", E2E.priv ? "включено, ключ на этом устройстве" : "ключ недоступен на этом устройстве", function () { toast(E2E.priv ? "Личные сообщения шифруются end-to-end" : "На этом устройстве нет ключа: личные сообщения не отправятся"); })
@@ -2200,41 +2074,6 @@
     body.appendChild(spGroup([
       rowBtn(rowIco(ICON.exit, "#ef4444"), "Выйти", "из этого аккаунта на устройстве", logoutConfirm, true)
     ]));
-  }
-  function emailSheet() {
-    const cur = (S.me && S.me.email) || "";
-    const linked = realEmail(cur);
-    openSheet(linked ? "Сменить почту" : "Привязать почту", function (b) {
-      b.appendChild(h("p", { class: "hint", text: linked ? "Сейчас привязана: " + cur + ". Почта видна только тебе, в профиле её нет." : "Привяжи почту, чтобы входить по коду из письма. Она видна только тебе, в профиле не показывается." }));
-      const inp = h("input", { type: "email", maxlength: 254, placeholder: "you@example.com" });
-      b.appendChild(h("label", { class: "lab" }, "Новая почта", inp));
-      b.appendChild(h("div", { class: "btn-row" }, btnPrimary("Отправить код", async function () {
-        const v = inp.value.trim().toLowerCase();
-        if (!isEmail(v)) return toast("Введи почту");
-        const r = await sb.auth.updateUser({ email: v });
-        if (r.error) return toast(errMsg(r.error));
-        emailCodeStep(v);
-      })));
-    });
-  }
-  function emailCodeStep(v) {
-    openSheet("Код из письма", function (b) {
-      b.appendChild(h("p", { class: "hint", text: "Код отправлен на " + v + ". Введи 6 цифр из письма." }));
-      const code = h("input", { type: "text", inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code", placeholder: "6 цифр" });
-      b.appendChild(h("label", { class: "lab" }, "Код", code));
-      b.appendChild(h("div", { class: "btn-row" },
-        btnGhost("Назад", emailSheet),
-        btnPrimary("Подтвердить", async function () {
-          const t = code.value.trim();
-          if (!/^\d{6}$/.test(t)) return toast("Код — 6 цифр");
-          const r = await sb.auth.verifyOtp({ email: v, token: t, type: "email_change" });
-          if (r.error) return toast(errMsg(r.error));
-          if (r.data && r.data.user) S.me = r.data.user;
-          closeSheet();
-          renderSettingsPage();
-          toast("Почта привязана");
-        })));
-    });
   }
   function profileStyleSheet() {
     const p = S.profile;
@@ -2343,18 +2182,29 @@
   function myEditSheet() {
     const p = S.profile;
     openSheet("Изменить профиль", function (b) {
+      const canUn = !p.username || googleLinked(S.me);
       const dn = h("input", { type: "text", maxlength: 64, value: p.display_name || "" });
-      const un = h("input", { type: "text", value: "@" + p.username, disabled: true });
+      const un = h("input", { type: "text", maxlength: 32, value: p.username || "", placeholder: "например, alex_99", disabled: !canUn, autocomplete: "off" });
       const bio = h("textarea", { maxlength: 280 }, p.bio || "");
       const se = h("input", { type: "text", maxlength: 8, value: p.status_emoji || "", placeholder: "например, ^_^" });
       const st = h("input", { type: "text", maxlength: 80, value: p.status_text || "", placeholder: "Например: на работе до 18:00" });
       b.appendChild(h("label", { class: "lab" }, "Имя", dn));
-      b.appendChild(h("label", { class: "lab" }, "Username (логин, поэтому фиксирован)", un));
+      b.appendChild(h("label", { class: "lab" }, "Username", un));
+      b.appendChild(h("p", { class: "hint", text: canUn ? "Латиница, цифры и _, от 3 до 32 символов. Можно не задавать." : "Сменить username можно, когда к аккаунту привязан Google (в настройках)." }));
       b.appendChild(h("label", { class: "lab" }, "О себе", bio));
       b.appendChild(h("div", { class: "ttl", text: "Статус" }));
       b.appendChild(h("label", { class: "lab" }, "Значок статуса", se));
       b.appendChild(h("label", { class: "lab" }, "Текст статуса", st));
       b.appendChild(h("div", { class: "btn-row" }, btnPrimary("Сохранить", async function () {
+        if (canUn) {
+          const want = un.value.trim().toLowerCase();
+          if (want !== (p.username || "")) {
+            if (!/^[a-z0-9_]{3,32}$/.test(want)) return toast("Username: 3–32 символа, латиница, цифры и _");
+            const ru = await sb.rpc("set_username", { u: want });
+            if (ru.error) return toast(errMsg(ru.error));
+            applySelf(ru.data);
+          }
+        }
         const patch = {
           display_name: dn.value.trim(),
           bio: bio.value.trim(),
@@ -2385,7 +2235,7 @@
         const r = await sb.from("profiles").select("*").or(profileOr(q)).neq("id", S.me.id).limit(15);
         (r.data || []).forEach(function (p) {
           S.profiles.set(p.id, Object.assign({}, S.profiles.get(p.id) || {}, p));
-          res.appendChild(rowBtn(avEl({ seed: p.id, name: pName(p), url: p.avatar_url, animated: p.avatar_animated, size: "sm" }), pName(p), "@" + p.username + " · ID " + p.uid, function () { onPick(p); }));
+          res.appendChild(rowBtn(avEl({ seed: p.id, name: pName(p), url: p.avatar_url, animated: p.avatar_animated, size: "sm" }), pName(p), (uTag(p) ? uTag(p) + " · " : "") + "ID " + p.uid, function () { onPick(p); }));
         });
         if (!res.children.length) res.appendChild(emptyNote("Никого не нашли"));
       }, 260);
@@ -2721,16 +2571,7 @@
   }
 
   function wire() {
-    document.querySelectorAll("#auth-seg .seg-btn").forEach(function (b) {
-      b.addEventListener("click", function () { setAuthMode(b.dataset.mode); });
-    });
-    $("auth-form").addEventListener("submit", onAuthSubmit);
-    $("otp-email-form").addEventListener("submit", onOtpSend);
-    $("otp-code-form").addEventListener("submit", onOtpVerify);
-    $("o-resend").addEventListener("click", onOtpResend);
     $("g-login").addEventListener("click", onGoogleLogin);
-    $("o-back").addEventListener("click", onOtpBack);
-    $("legacy-toggle").addEventListener("click", function () { toggleLegacy($("legacy-wrap").classList.contains("hidden")); });
     $("search").addEventListener("input", onSearchInput);
     $("me-btn").addEventListener("click", function () { openProfilePage(S.me.id); });
     $("settings-btn").addEventListener("click", openSettingsPage);
@@ -2782,15 +2623,6 @@
         autosize();
         renderBars();
       }
-    });
-    $("a-eye").addEventListener("click", function () {
-      const inp = $("a-pass");
-      const show = inp.type === "password";
-      inp.type = show ? "text" : "password";
-      $("a-eye").querySelector(".ey-open").classList.toggle("hidden", show);
-      $("a-eye").querySelector(".ey-off").classList.toggle("hidden", !show);
-      $("a-eye").setAttribute("aria-label", show ? "Скрыть пароль" : "Показать пароль");
-      inp.focus();
     });
     $("pp-back").addEventListener("click", closeProfilePage);
     $("sp-back").addEventListener("click", closeSettingsPage);
@@ -2876,7 +2708,6 @@
       setOffline(false);
       flushOutbox().then(function () { loadChats(); });
     });
-    setAuthMode("login");
     if (/error_description=/.test(location.hash)) {
       const m = /error_description=([^&]*)/.exec(location.hash);
       toast(decodeURIComponent((m && m[1] || "").replace(/\+/g, " ")) || "Не удалось войти через Google");
