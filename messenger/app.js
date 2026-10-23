@@ -317,6 +317,7 @@
     flushOutbox();
     openFromUrl();
     connectRealtime();
+    nativeAskOnce();
     heartbeat();
     setInterval(heartbeat, 120000);
     document.addEventListener("visibilitychange", function () {
@@ -551,18 +552,6 @@
     await publishKey(k.publicKey, k.privB64);
     await saveLocalKey(k.privateKey, k.publicKey);
     toast("Создан новый ключ шифрования");
-  }
-  function e2eSheet() {
-    openSheet("Шифрование личных чатов", function (b) {
-      b.appendChild(h("p", { class: "hint", text: E2E.priv
-        ? "Ключ есть на этом устройстве. Его резервная копия хранится на сервере, поэтому после переустановки ключ восстановится сам."
-        : "Ключ на этом устройстве не найден, поэтому личные сообщения не открываются и не отправляются. Старые сообщения, зашифрованные прежним ключом, после создания нового ключа не откроются." }));
-      if (!E2E.priv) {
-        b.appendChild(h("div", { class: "btn-row" }, btnDanger("Создать новый ключ", async function () {
-          try { await resetE2EKey(); closeSheet(); } catch (e) { toast(errMsg(e)); }
-        })));
-      }
-    });
   }
   async function chatKeyFor(otherId) {
     if (!E2E.priv || !otherId) return null;
@@ -1985,6 +1974,7 @@
   }
 
   function openSheet(title, build) {
+    if (settingsPageOpen()) return openSpSub(title, build);
     hideCtx();
     $("sheet-title").textContent = title;
     const body = $("sheet-body");
@@ -1997,6 +1987,7 @@
     }
   }
   function closeSheet() {
+    if (S.spSub && settingsPageOpen()) return spBack();
     $("sheet").classList.add("hidden");
     clear($("sheet-body"));
   }
@@ -2195,13 +2186,40 @@
   function openSettingsPage() {
     closeSheet();
     hideCtx();
+    S.spSub = null;
+    $("sp-title").textContent = "Настройки";
     renderSettingsPage();
     $("settings-page").classList.remove("hidden");
     $("sp-body").scrollTop = 0;
   }
   function closeSettingsPage() {
+    S.spSub = null;
+    $("sp-title").textContent = "Настройки";
     $("settings-page").classList.add("hidden");
     hideCtx();
+  }
+  // Пункты настроек открывают отдельную страницу, а не шторку снизу:
+  // пока открыта страница настроек, openSheet рисует содержимое на ней.
+  function openSpSub(title, build) {
+    hideCtx();
+    S.spSub = title;
+    $("sp-title").textContent = title;
+    const body = $("sp-body");
+    body.replaceChildren();
+    const wrap = h("div", { class: "sp-sub sheet-body" });
+    build(wrap);
+    body.appendChild(wrap);
+    body.scrollTop = 0;
+  }
+  function spBack() {
+    if (S.spSub) {
+      S.spSub = null;
+      $("sp-title").textContent = "Настройки";
+      renderSettingsPage();
+      $("sp-body").scrollTop = 0;
+      return;
+    }
+    closeSettingsPage();
   }
   function settingsPageOpen() { return !$("settings-page").classList.contains("hidden"); }
   function spGroup(rows) {
@@ -2209,17 +2227,12 @@
     rows.forEach(function (r) { g.appendChild(r); });
     return g;
   }
-  async function notifyPermission() {
+  // Кнопки «Уведомления» в настройках больше нет: системное разрешение спрашиваем один раз после входа
+  async function nativeAskOnce() {
     const LN = nativeNotifier();
-    if (LN) {
-      try {
-        const ok = await nativeNotifyPermission(LN);
-        return toast(ok ? "Уведомления включены" : "Уведомления не разрешены");
-      } catch (e) { return toast("Не получилось включить уведомления"); }
-    }
-    if (!("Notification" in window)) return toast("Браузер не поддерживает уведомления");
-    const perm = await Notification.requestPermission();
-    toast(perm === "granted" ? "Уведомления включены" : "Уведомления не разрешены");
+    if (!LN || localStorage.getItem("echo-notif-asked")) return;
+    localStorage.setItem("echo-notif-asked", "1");
+    try { await nativeNotifyPermission(LN); } catch (e) {}
   }
   async function installApp() {
     const e = S.installEvt;
@@ -2233,9 +2246,6 @@
       if (r && r.error) return toast(errMsg(r.error));
       toast("Готово");
     });
-  }
-  function privacySummary(p) {
-    return (p.hide_last_seen ? "статус скрыт" : "статус виден") + ", новые чаты " + (p.dm_closed ? "закрыты" : "открыты");
   }
   function choiceRow(title, sub, active, fn) {
     return rowBtn(h("span", { class: "sp-ico", style: { background: active ? "#22c55e" : "rgba(167,139,250,.14)" } }, active ? "✓" : ""), title, sub, fn);
@@ -2261,7 +2271,7 @@
     if (S.presCh) {
       try { if (hide) await S.presCh.untrack(); else await S.presCh.track({ at: Date.now() }); } catch (e) {}
     }
-    renderSettingsPage();
+    if (!S.spSub) renderSettingsPage();
     privacySheet();
   }
   function logoutConfirm() {
@@ -2279,25 +2289,23 @@
       h("b", { text: pName(p) }),
       h("span", { text: uTag(p) })));
     body.appendChild(spGroup([
-      rowBtn(rowIco(ICON.user, "#3b82f6"), "Аккаунт", "имя, о себе, статус", function () { myEditSheet(); }),
-      rowBtn(rowIco(ICON.user, "#4285f4"), "Google", googleLinked(S.me) ? "привязан" : "не привязан, нажми, чтобы привязать", function () { if (googleLinked(S.me)) toast("Google уже привязан"); else linkGoogle(); }),
-      rowBtn(rowIco(ICON.brush, "#a855f7"), "Оформление профиля", "фон и музыка профиля", function () { profileStyleSheet(); }),
-      rowBtn(rowIco(ICON.hash, "#0ea5e9"), "Мой ID", String(p.uid || "—"), function () { copyText(String(p.uid)); }),
-      rowBtn(rowIco(ICON.lock, "#10b981"), "Шифрование личных чатов", E2E.priv ? "включено, ключ на этом устройстве" : "ключ недоступен на этом устройстве", function () { e2eSheet(); })
+      rowBtn(rowIco(ICON.user, "#3b82f6"), "Аккаунт", null, function () { myEditSheet(); }),
+      rowBtn(rowIco(ICON.user, "#4285f4"), "Google", null, function () { if (googleLinked(S.me)) toast("Google уже привязан"); else linkGoogle(); }),
+      rowBtn(rowIco(ICON.brush, "#a855f7"), "Оформление профиля", null, function () { profileStyleSheet(); }),
     ]));
     body.appendChild(spGroup([
-      rowBtn(rowIco(ICON.lock, "#64748b"), "Приватность", privacySummary(p), privacySheet)
+      rowBtn(rowIco(ICON.lock, "#64748b"), "Приватность", null, privacySheet)
     ]));
-    const notifRows = [
-      rowBtn(rowIco(ICON.sticker, "#f97316"), "Стикеры", "паки, свои картинки и GIF", function () { stickerSheet(); }),
-      rowBtn(rowIco(ICON.bell, "#ef4444"), "Уведомления", "браузерные, когда приложение свёрнуто", notifyPermission)
-    ];
-    if (S.installEvt) notifRows.push(rowBtn(rowIco(ICON.install, "#22c55e"), "Установить приложение", "добавить Echo на экран", installApp));
-    body.appendChild(spGroup(notifRows));
+    body.appendChild(spGroup([
+      rowBtn(rowIco(ICON.sticker, "#f97316"), "Стикеры", null, function () { stickerSheet(); })
+    ]));
+    if (S.installEvt) body.appendChild(spGroup([
+      rowBtn(rowIco(ICON.install, "#22c55e"), "Установить приложение", null, installApp)
+    ]));
     if (!S.installEvt && !window.Capacitor) body.appendChild(h("div", { class: "sp-hint", text: "Установка: Android — меню браузера, «Установить приложение». iPhone — Safari, «Поделиться», «На экран «Домой»»." }));
     body.appendChild(spGroup([
-      rowBtn(rowIco(ICON.exit, "#ef4444"), "Выйти", "из этого аккаунта на устройстве", logoutConfirm, true),
-      rowBtn(rowIco(ICON.exit, "#f59e0b"), "Выйти на других устройствах", "остальные телефоны и браузеры", logoutOthersConfirm)
+      rowBtn(rowIco(ICON.exit, "#ef4444"), "Выйти", null, logoutConfirm, true),
+      rowBtn(rowIco(ICON.exit, "#f59e0b"), "Выйти на других устройствах", null, logoutOthersConfirm)
     ]));
   }
   function profileStyleSheet() {
@@ -2325,7 +2333,8 @@
     });
   }
   function refreshStyleSheet() {
-    if (!$("sheet").classList.contains("hidden") && $("sheet-title").textContent === "Оформление профиля") profileStyleSheet();
+    const t = S.spSub || (!$("sheet").classList.contains("hidden") ? $("sheet-title").textContent : "");
+    if (t === "Оформление профиля") profileStyleSheet();
   }
 
   function ppMenu(x, y) {
@@ -2388,7 +2397,7 @@
     cacheSet("me", row);
     renderMeBtn();
     if (profilePageOpen()) renderProfilePage();
-    if (settingsPageOpen()) renderSettingsPage();
+    if (settingsPageOpen() && !S.spSub) renderSettingsPage();
     renderSidebar();
   }
 
@@ -2943,7 +2952,7 @@
       }
     });
     $("pp-back").addEventListener("click", closeProfilePage);
-    $("sp-back").addEventListener("click", closeSettingsPage);
+    $("sp-back").addEventListener("click", spBack);
     $("pp-scroll").addEventListener("scroll", function () { onPpScroll(); ppScheduleSnap(); }, { passive: true });
     $("pp-scroll").addEventListener("touchstart", function () { ppTouching = true; }, { passive: true });
     ["touchend", "touchcancel"].forEach(function (ev) {
@@ -2983,7 +2992,7 @@
           clear($("lightbox"));
           return;
         }
-        if (settingsPageOpen()) return closeSettingsPage();
+        if (settingsPageOpen()) return spBack();
         if (profilePageOpen()) return closeProfilePage();
         if (panelMode) return closePanel();
         if (S.open) return closeChat();

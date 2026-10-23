@@ -347,7 +347,9 @@ img,video{display:block}
 .sp-head b{font-size:20px;font-weight:700;color:var(--text);margin-top:8px}
 .sp-head span{font-size:14px;color:var(--muted)}
 .sp-group{margin-bottom:14px;border-radius:20px;background:var(--panel);border:1px solid var(--line);overflow:hidden}
-.sp-group .row-btn{width:100%;margin:0;border-radius:0}
+.sp-group .row-btn{width:100%;margin:0;border-radius:0;padding:13px 14px;font-size:16px}
+.sp-sub{max-width:560px;margin:0 auto}
+.sp-sub.sheet-body{padding:4px 0 24px;overflow:visible}
 .sp-group .row-btn+.row-btn{border-top:1px solid var(--line)}
 .sp-ico{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;flex:none;color:#fff}
 .sp-ico svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
