@@ -42,6 +42,7 @@
     info: "M12 16v-5M12 8h.01M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z",
     exit: "M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10",
     close: "M6 6l12 12M18 6L6 18",
+    mail: "M3 6h18v12H3zM3 7l9 6 9-6",
     user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0",
     sticker: "M15 3H6a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h9l7-7V6a3 3 0 0 0-3-3zM15 21v-4a2 2 0 0 1 2-2h4",
     bell: "M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8zM10 20a2 2 0 0 0 4 0",
@@ -127,6 +128,8 @@
   function errMsg(e) {
     const m = String((e && (e.message || e.error_description)) || e || "");
     if (/Invalid login/i.test(m)) return "Неверный username или пароль";
+    if (/over_email_send_rate_limit|rate limit|too many|for security purposes/i.test(m)) return "Слишком часто. Подожди немного и попробуй снова";
+    if (/otp_expired|expired|invalid.*(otp|token)|token.*invalid/i.test(m)) return "Код неверный или устарел. Запроси новый";
     if (/already registered|already been registered|User already|занят/i.test(m)) return "Такой username уже занят";
     if (/edit window/i.test(m)) return "Редактировать можно только 48 часов";
     if (/row-level security|not allowed|permission/i.test(m)) return "Нет доступа";
@@ -292,6 +295,97 @@
       toast(errMsg(err));
     } finally {
       btn.disabled = false;
+    }
+  }
+
+  function isEmail(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
+  function realEmail(e) { return !!e && !/@gemgram\.app$/i.test(e); }
+  let otpEmail = "";
+  let otpTick = null;
+  function otpCooldown(sec) {
+    clearInterval(otpTick);
+    const btn = $("o-resend");
+    let left = sec;
+    btn.disabled = true;
+    btn.textContent = "Отправить снова (" + left + ")";
+    otpTick = setInterval(function () {
+      left -= 1;
+      if (left <= 0) {
+        clearInterval(otpTick);
+        btn.disabled = false;
+        btn.textContent = "Отправить снова";
+      } else {
+        btn.textContent = "Отправить снова (" + left + ")";
+      }
+    }, 1000);
+  }
+  async function sendOtp(email) {
+    const r = await sb.auth.signInWithOtp({ email: email, options: { shouldCreateUser: true } });
+    if (r.error) throw r.error;
+  }
+  function showOtpStep(step) {
+    $("otp-email-form").classList.toggle("hidden", step !== "email");
+    $("otp-code-form").classList.toggle("hidden", step !== "code");
+  }
+  function toggleLegacy(on) {
+    $("legacy-wrap").classList.toggle("hidden", !on);
+    $("otp-email-form").classList.toggle("hidden", on);
+    $("otp-code-form").classList.add("hidden");
+    $("legacy-toggle").textContent = on ? "← Вход по почте" : "Войти по логину и паролю";
+  }
+  async function onOtpSend(e) {
+    e.preventDefault();
+    const email = $("o-email").value.trim().toLowerCase();
+    if (!isEmail(email)) return toast("Введи почту");
+    $("o-send").disabled = true;
+    try {
+      await sendOtp(email);
+      otpEmail = email;
+      $("o-sent-to").textContent = "Код отправлен на " + email + ". Введи 6 цифр из письма.";
+      $("o-code").value = "";
+      showOtpStep("code");
+      otpCooldown(30);
+      setTimeout(function () { $("o-code").focus(); }, 80);
+    } catch (err) {
+      toast(errMsg(err));
+    } finally {
+      $("o-send").disabled = false;
+    }
+  }
+  async function onOtpResend() {
+    if (!otpEmail) return showOtpStep("email");
+    $("o-resend").disabled = true;
+    try {
+      await sendOtp(otpEmail);
+      toast("Код отправлен снова");
+      otpCooldown(30);
+    } catch (err) {
+      toast(errMsg(err));
+      $("o-resend").disabled = false;
+    }
+  }
+  function onOtpBack() {
+    clearInterval(otpTick);
+    $("o-resend").disabled = false;
+    $("o-resend").textContent = "Отправить снова";
+    showOtpStep("email");
+  }
+  async function onOtpVerify(e) {
+    e.preventDefault();
+    const token = $("o-code").value.trim();
+    if (!/^\d{6}$/.test(token)) return toast("Код — 6 цифр");
+    $("o-verify").disabled = true;
+    try {
+      const r = await sb.auth.verifyOtp({ email: otpEmail, token: token, type: "email" });
+      if (r.error) throw r.error;
+      const ens = await sb.rpc("ensure_profile");
+      if (ens.error) throw ens.error;
+      clearInterval(otpTick);
+      await enter(r.data.user);
+    } catch (err) {
+      toast(errMsg(err));
+    } finally {
+      $("o-verify").disabled = false;
     }
   }
 
@@ -2077,6 +2171,7 @@
       h("span", { text: "@" + p.username })));
     body.appendChild(spGroup([
       rowBtn(rowIco(ICON.user, "#3b82f6"), "Аккаунт", "имя, о себе, статус", function () { myEditSheet(); }),
+      rowBtn(rowIco(ICON.mail, "#60a5fa"), "Почта", realEmail(S.me && S.me.email) ? S.me.email : "не привязана, нужна для входа по коду", function () { emailSheet(); }),
       rowBtn(rowIco(ICON.brush, "#a855f7"), "Оформление профиля", "фон и музыка профиля", function () { profileStyleSheet(); }),
       rowBtn(rowIco(ICON.hash, "#0ea5e9"), "Мой ID", String(p.uid || "—"), function () { copyText(String(p.uid)); }),
       rowBtn(rowIco(ICON.lock, "#10b981"), "Шифрование личных чатов", E2E.priv ? "включено, ключ на этом устройстве" : "ключ недоступен на этом устройстве", function () { toast(E2E.priv ? "Личные сообщения шифруются end-to-end" : "На этом устройстве нет ключа: личные сообщения не отправятся"); })
@@ -2094,6 +2189,41 @@
     body.appendChild(spGroup([
       rowBtn(rowIco(ICON.exit, "#ef4444"), "Выйти", "из этого аккаунта на устройстве", logoutConfirm, true)
     ]));
+  }
+  function emailSheet() {
+    const cur = (S.me && S.me.email) || "";
+    const linked = realEmail(cur);
+    openSheet(linked ? "Сменить почту" : "Привязать почту", function (b) {
+      b.appendChild(h("p", { class: "hint", text: linked ? "Сейчас привязана: " + cur + ". Почта видна только тебе, в профиле её нет." : "Привяжи почту, чтобы входить по коду из письма. Она видна только тебе, в профиле не показывается." }));
+      const inp = h("input", { type: "email", maxlength: 254, placeholder: "you@example.com" });
+      b.appendChild(h("label", { class: "lab" }, "Новая почта", inp));
+      b.appendChild(h("div", { class: "btn-row" }, btnPrimary("Отправить код", async function () {
+        const v = inp.value.trim().toLowerCase();
+        if (!isEmail(v)) return toast("Введи почту");
+        const r = await sb.auth.updateUser({ email: v });
+        if (r.error) return toast(errMsg(r.error));
+        emailCodeStep(v);
+      })));
+    });
+  }
+  function emailCodeStep(v) {
+    openSheet("Код из письма", function (b) {
+      b.appendChild(h("p", { class: "hint", text: "Код отправлен на " + v + ". Введи 6 цифр из письма." }));
+      const code = h("input", { type: "text", inputmode: "numeric", maxlength: 6, autocomplete: "one-time-code", placeholder: "6 цифр" });
+      b.appendChild(h("label", { class: "lab" }, "Код", code));
+      b.appendChild(h("div", { class: "btn-row" },
+        btnGhost("Назад", emailSheet),
+        btnPrimary("Подтвердить", async function () {
+          const t = code.value.trim();
+          if (!/^\d{6}$/.test(t)) return toast("Код — 6 цифр");
+          const r = await sb.auth.verifyOtp({ email: v, token: t, type: "email_change" });
+          if (r.error) return toast(errMsg(r.error));
+          if (r.data && r.data.user) S.me = r.data.user;
+          closeSheet();
+          renderSettingsPage();
+          toast("Почта привязана");
+        })));
+    });
   }
   function profileStyleSheet() {
     const p = S.profile;
@@ -2584,6 +2714,11 @@
       b.addEventListener("click", function () { setAuthMode(b.dataset.mode); });
     });
     $("auth-form").addEventListener("submit", onAuthSubmit);
+    $("otp-email-form").addEventListener("submit", onOtpSend);
+    $("otp-code-form").addEventListener("submit", onOtpVerify);
+    $("o-resend").addEventListener("click", onOtpResend);
+    $("o-back").addEventListener("click", onOtpBack);
+    $("legacy-toggle").addEventListener("click", function () { toggleLegacy($("legacy-wrap").classList.contains("hidden")); });
     $("search").addEventListener("input", onSearchInput);
     $("me-btn").addEventListener("click", function () { openProfilePage(S.me.id); });
     $("settings-btn").addEventListener("click", openSettingsPage);

@@ -103,6 +103,9 @@ $$;
 create function public.handle_new_user() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
+  if coalesce(new.raw_user_meta_data->>'username', '') = '' then
+    return new; -- вход по коду: профиль создаёт ensure_profile() после ввода кода
+  end if;
   insert into public.profiles (id, username, display_name)
   values (
     new.id,
@@ -317,3 +320,36 @@ language sql stable security definer set search_path = public as $$
 $$;
 
 grant execute on function public.username_available(text) to anon, authenticated;
+
+-- Вход по коду из письма: после verifyOtp клиент вызывает ensure_profile(),
+-- которая создаёт профиль, если его ещё нет (username берётся из почты).
+create or replace function public.ensure_profile() returns public.profiles
+language plpgsql security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  mail text;
+  base text;
+  cand text;
+  n int := 0;
+  prof public.profiles;
+begin
+  if me is null then raise exception 'not authenticated'; end if;
+  select * into prof from public.profiles where id = me;
+  if found then return prof; end if;
+  select email into mail from auth.users where id = me;
+  base := lower(regexp_replace(coalesce(split_part(coalesce(mail, ''), '@', 1), ''), '[^a-zA-Z0-9_]', '_', 'g'));
+  base := left(base, 24);
+  if char_length(base) < 3 then base := 'user_' || left(replace(me::text, '-', ''), 8); end if;
+  cand := base;
+  while not public.username_available(cand) loop
+    n := n + 1;
+    cand := left(base, 24) || '_' || n::text;
+  end loop;
+  insert into public.profiles (id, username, display_name)
+  values (me, cand, coalesce(nullif(split_part(coalesce(mail, ''), '@', 1), ''), cand))
+  returning * into prof;
+  return prof;
+end $$;
+
+revoke all on function public.ensure_profile() from public, anon;
+grant execute on function public.ensure_profile() to authenticated;
