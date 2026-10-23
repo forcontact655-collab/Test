@@ -1,5 +1,5 @@
-const CACHE = "echo-v3";
-const SHELL = ["./", "index.html", "style.css", "app.js", "vendor/supabase.js", "manifest.webmanifest", "icon.png"];
+const CACHE = "echo-v4";
+const SHELL = ["./", "index.html", "style.css", "app.js", "vendor/supabase.js", "manifest.webmanifest", "icon.png", "e2e.js", "store.js"];
 
 self.addEventListener("install", function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }).then(function () { return self.skipWaiting(); }));

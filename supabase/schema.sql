@@ -11,6 +11,7 @@ create table public.profiles (
   profile_bg text check (profile_bg is null or profile_bg ~ '^#[0-9a-fA-F]{6}$'),
   music_url text,
   music_title text not null default '' check (char_length(music_title) <= 80),
+  public_key text check (public_key is null or char_length(public_key) <= 200),
   last_seen timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
@@ -223,6 +224,7 @@ create policy chat_members_delete on public.chat_members for delete to authentic
 
 revoke update on public.profiles from authenticated, anon;
 grant update (username, display_name, bio, status_emoji, status_text, avatar_url, avatar_animated, last_seen, profile_bg, music_url, music_title) on public.profiles to authenticated;
+grant update (public_key) on public.profiles to authenticated;
 revoke update on public.chats from authenticated, anon;
 grant update (title, description, avatar_url, avatar_animated) on public.chats to authenticated;
 revoke update on public.chat_members from authenticated, anon;

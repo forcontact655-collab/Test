@@ -36,6 +36,7 @@
   </section>
 
   <div id="app" class="app hidden">
+    <div id="offline-bar" class="offline-bar hidden">Нет сети. Показаны сохранённые данные, текст отправится при связи.</div>
     <aside id="side" class="side">
       <header class="side-top">
         <button id="me-btn" class="icon-btn avatar-btn" type="button" aria-label="Профиль"></button>
@@ -133,6 +134,8 @@
   <div id="toasts" class="toasts"></div>
 
   <script src="vendor/supabase.js"></script>
+  <script src="e2e.js"></script>
+  <script src="store.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
