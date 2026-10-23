@@ -403,6 +403,8 @@ img,video{display:block}
 .vp-btn:hover{background:rgba(255,255,255,.1)}
 .vp-ico{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .vp-solid{width:22px;height:22px;fill:currentColor;stroke:none}
-.pp-body{text-align:center}
-.pp-card,.pp-music{text-align:left}
-.profile-status{display:inline-block}
+.pp-over{position:absolute;left:0;right:0;bottom:0;z-index:2;max-width:560px;margin:0 auto;display:flex;flex-direction:column;align-items:flex-start;text-align:left;padding:0 16px 14px;pointer-events:none;text-shadow:0 1px 10px rgba(0,0,0,.45)}
+.pp-over>*{pointer-events:auto}
+.pp-over.pp-over-c{align-items:center;text-align:center}
+.pp-over .pp-acts{width:100%;margin:14px 0 0}
+.pp-over .pp-seen{margin-top:4px}

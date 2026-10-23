@@ -1911,10 +1911,8 @@
 
   function onPpScroll() {
     const sc = Math.max(0, $("pp-scroll").scrollTop);
-    const hh = Math.max(170, 360 - sc);
     const pr = Math.min(1, sc / 60);
-    $("pp-hero").style.height = hh + "px";
-    $("pp-body").style.marginTop = (360 - hh) + "px";
+    $("pp-over").classList.toggle("pp-over-c", pr >= 0.5);
     $("profile-page").style.setProperty("--p", pr.toFixed(3));
   }
 
@@ -1947,18 +1945,20 @@
     const online = isOn(p.id);
     const body = $("pp-body");
     body.replaceChildren();
-    body.appendChild(h("div", { class: "pp-name", text: pName(p) }));
-    body.appendChild(h("div", { class: "pp-user", text: "@" + p.username }));
-    body.appendChild(h("div", { class: "pp-seen" + (online ? " on" : ""), text: online ? "в сети" : "был(а) " + agoText(p.last_seen) }));
+    const over = $("pp-over");
+    over.replaceChildren();
+    over.appendChild(h("div", { class: "pp-name", text: pName(p) }));
+    over.appendChild(h("div", { class: "pp-user", text: "@" + p.username }));
+    over.appendChild(h("div", { class: "pp-seen" + (online ? " on" : ""), text: online ? "в сети" : "был(а) " + agoText(p.last_seen) }));
     const st = statusNode(p);
-    if (st) body.appendChild(st);
+    if (st) over.appendChild(st);
     const acts = own
       ? [actBtn("Выбрать фото", ICON.camera, function () { pickFile("image/*,video/mp4,video/webm", changeAvatar); }),
          actBtn("Изменить", ICON.edit, myEditSheet),
          actBtn("Настройки", ICON.gear, openSettingsPage)]
       : [actBtn("Написать", ICON.msg, function () { openDirect(p.id); }),
          actBtn("Скопировать ID", ICON.copy, function () { copyText(String(p.uid)); })];
-    body.appendChild(h("div", { class: "pp-acts" }, acts));
+    over.appendChild(h("div", { class: "pp-acts" }, acts));
     if (p.music_url) body.appendChild(musicCard(p));
     const info = h("div", { class: "pp-card" });
     if (p.bio) info.appendChild(pRow("О себе", p.bio));
