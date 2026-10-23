@@ -213,7 +213,7 @@
   function profileOf(c) { return c.kind === "direct" && c.otherId ? S.profiles.get(c.otherId) || null : null; }
   function chatAvProps(c) {
     const p = profileOf(c);
-    if (p) return { seed: p.id, name: pName(p), url: p.avatar_url, animated: p.avatar_animated, online: S.online.has(p.id) };
+    if (p) return { seed: p.id, name: pName(p), url: p.avatar_url, animated: p.avatar_animated, online: isOn(p.id) };
     return { seed: c.id, name: c.title, url: c.avatar_url, animated: c.avatar_animated };
   }
   function kindLabel(c) { return c.kind === "direct" ? "Личный чат" : c.kind === "group" ? "Группа" : "Канал"; }
@@ -329,6 +329,10 @@
         heartbeat();
       }
     });
+  }
+
+  function isOn(id) {
+    return !!S.me && (id === S.me.id || S.online.has(id));
   }
 
   function heartbeat() {
@@ -524,6 +528,7 @@
   async function prepMsgs(list, c) {
     for (const m of list) {
       if (EchoE2E.isEncrypted(m.body) && m._plain === undefined) m._plain = await plainOf(m.body, c);
+      if (EchoE2E.isEncrypted(m.media_name) && m._pname === undefined) m._pname = await plainOf(m.media_name, c);
     }
   }
   async function encryptFor(c, text) {
@@ -573,6 +578,7 @@
     else if (l.kind === "text") body = prevText(l);
     else if (l.kind === "image") body = prevText(l) || "Фото";
     else if (l.kind === "video") body = prevText(l) || "Видео";
+    else if (l.kind === "audio") body = prevText(l) || "Музыка";
     else if (l.kind === "sticker") body = "Стикер";
     else body = prevText(l);
     let who = "";
@@ -607,7 +613,7 @@
       class: "item", onclick: function () { openDirect(p.id); },
       oncontextmenu: function (e) { e.preventDefault(); openProfilePage(p.id); }
     },
-      avEl({ seed: p.id, name: pName(p), url: p.avatar_url, animated: p.avatar_animated, online: S.online.has(p.id) }),
+      avEl({ seed: p.id, name: pName(p), url: p.avatar_url, animated: p.avatar_animated, online: isOn(p.id) }),
       h("div", { class: "item-main" },
         h("div", { class: "row1" }, h("span", { class: "nm", text: pName(p) })),
         h("div", { class: "row2" }, h("span", { class: "pv", text: "@" + p.username }))));
@@ -708,7 +714,7 @@
     if (c.kind === "direct") {
       const p = profileOf(c);
       if (!p) return "";
-      if (S.online.has(p.id)) return "в сети";
+      if (isOn(p.id)) return "в сети";
       return "был(а) " + agoText(p.last_seen);
     }
     if (c.kind === "group") return c.members.length + " участников";
@@ -801,7 +807,7 @@
     if (r) {
       who = r.sender_id === S.me.id ? "Вы" : pName(S.profiles.get(r.sender_id));
       if (r.deleted_at) text = "Сообщение удалено";
-      else text = shown(r) || (r.kind === "sticker" ? "Стикер" : r.kind === "video" ? "Видео" : "Фото");
+      else text = shown(r) || (r.kind === "sticker" ? "Стикер" : r.kind === "video" ? "Видео" : r.kind === "audio" ? "Музыка" : "Фото");
     }
     return h("div", { class: "quote", onclick: function (e) { e.stopPropagation(); jumpTo(id); } },
       h("b", { text: who }), h("span", { text: text }));
@@ -843,7 +849,8 @@
       b.appendChild(h("div", { class: "gone", text: "Сообщение удалено" }));
     } else {
       if (m.kind === "image" && m.media_url) b.appendChild(h("img", { class: "media", src: m.media_url, alt: "фото", loading: "lazy", onclick: function () { lightbox(m.media_url); } }));
-      if (m.kind === "video" && m.media_url) b.appendChild(h("video", { class: "media", src: m.media_url, controls: true, playsinline: true, preload: "metadata" }));
+      if (m.kind === "video" && m.media_url) b.appendChild(videoCard(m));
+      if (m.kind === "audio" && m.media_url) b.appendChild(audioCard(m));
       if (m.kind === "sticker" && m.media_url) {
         b.appendChild(isVideo(m.media_url)
           ? h("video", { class: "sticker-img", src: m.media_url, autoplay: true, loop: true, muted: true, playsinline: true })
@@ -942,7 +949,7 @@
   }
   function previewBody(m) {
     if (m.deleted_at) return "Сообщение удалено";
-    return shown(m) || (m.kind === "sticker" ? "Стикер" : m.kind === "video" ? "Видео" : "Фото");
+    return shown(m) || (m.kind === "sticker" ? "Стикер" : m.kind === "video" ? "Видео" : m.kind === "audio" ? "Музыка" : "Фото");
   }
   function bar(title, text, onClose) {
     return h("div", { class: "bar" },
@@ -1011,6 +1018,7 @@
     if (S.replyTo) row.reply_to = S.replyTo;
     const plain = row.body;
     if (plain && c.kind === "direct") row.body = await encryptFor(c, plain);
+    if (row.media_name && c.kind === "direct") row.media_name = await encryptFor(c, row.media_name);
     if (!navigator.onLine) {
       if (row.kind !== "text") return toast("Без сети отправляется только текст");
       const lid = "L" + Date.now().toString(36) + rnd();
@@ -1261,12 +1269,14 @@
           closeSheet();
           const r = await sb.from("messages").insert({
             chat_id: c.id, sender_id: S.me.id, kind: m.kind, body: await outBody(c, shown(m) || ""),
-            media_url: m.media_url || null, forwarded_from: who
+            media_url: m.media_url || null, forwarded_from: who,
+            media_name: m.media_name ? await outBody(c, mediaName(m) || "") : null, media_quality: m.media_quality || null
           }).select("*").single();
           if (r.error) return toast(errMsg(r.error));
           toast("Переслано: " + chatTitle(c));
           if (S.open === c.id) {
             r.data._plain = shown(m) || "";
+            r.data._pname = mediaName(m) || null;
             addMessage(r.data);
           }
           scheduleChats();
@@ -1391,20 +1401,120 @@
     return { url: sb.storage.from("media").getPublicUrl(path).data.publicUrl, animated: animated };
   }
 
+  const VIDEO_ORIG = ["video/mp4", "video/webm"];
+  const QLABEL = { orig: "Оригинал", "720p": "720p", "480p": "480p", "360p": "360p" };
+  function qualityLabel(q) { return QLABEL[q] || ""; }
+  function mediaName(m) { return m._pname !== undefined ? m._pname : m.media_name; }
+
+  async function uploadMedia(blob, ext, type) {
+    const path = S.me.id + "/media/" + Date.now().toString(36) + rnd() + "." + ext;
+    const up = await sb.storage.from("media").upload(path, blob, { contentType: type, upsert: false });
+    if (up.error) throw up.error;
+    return sb.storage.from("media").getPublicUrl(path).data.publicUrl;
+  }
+
   async function handleAttach(f) {
     const c = curChat();
     if (!c || !canPost(c)) return;
     const caption = $("input").value.trim();
+    if (f.type.indexOf("video/") === 0) return chooseVideoQuality(f, caption);
+    if (f.type.indexOf("audio/") === 0) return sendAudio(f, caption);
     try {
       toast("Загружаю…");
-      const isVid = f.type.indexOf("video/") === 0;
-      const res = await prepareAndUpload(f, "media", isVid ? { maxBytes: 20 * MB } : { maxSide: 1280, maxBytes: 20 * MB, quality: 0.86 });
-      await sendRow({ kind: isVid ? "video" : "image", media_url: res.url, body: caption });
+      const res = await prepareAndUpload(f, "media", { maxSide: 1280, maxBytes: 20 * MB, quality: 0.86 });
+      await sendRow({ kind: "image", media_url: res.url, body: caption });
       $("input").value = "";
       autosize();
     } catch (e) {
       toast(errMsg(e));
     }
+  }
+
+  function chooseVideoQuality(f, caption) {
+    const orig = VIDEO_ORIG.indexOf(f.type) >= 0;
+    const canEncode = EchoMedia.canTranscode();
+    if (!orig && !canEncode) return toast("Этот формат не поддерживается. Выбери MP4 или WebM");
+    const opts = [];
+    if (orig) opts.push(["orig", "Оригинал", "без сжатия, до 20 МБ"]);
+    if (canEncode) {
+      opts.push(["720", "720p", "HD, лучшее качество"]);
+      opts.push(["480", "480p", "баланс качества и размера"]);
+      opts.push(["360", "360p", "экономия трафика"]);
+    }
+    openSheet("Качество видео", function (b) {
+      opts.forEach(function (o) {
+        b.appendChild(rowBtn(rowIco(ICON.globe, "#8b5cf6"), o[1], o[2], function () {
+          closeSheet();
+          sendVideo(f, o[0], caption);
+        }));
+      });
+    });
+  }
+
+  async function sendVideo(f, key, caption) {
+    const c = curChat();
+    if (!c || !canPost(c)) return;
+    try {
+      let blob = f;
+      let quality = "orig";
+      if (key !== "orig") {
+        toast("Сжимаю видео…");
+        let last = -10;
+        const out = await EchoMedia.transcode(f, Number(key), function (pr) {
+          const pct = Math.round(pr * 100);
+          if (pct - last >= 10) {
+            last = pct;
+            toast("Сжимаю видео… " + pct + "%");
+          }
+        });
+        blob = out;
+        quality = key + "p";
+      }
+      if (blob.size > 20 * MB) throw new Error("Видео больше 20 МБ, выбери качество ниже");
+      const ext = blob.type.indexOf("mp4") >= 0 ? "mp4" : "webm";
+      toast("Загружаю видео…");
+      const url = await uploadMedia(blob, ext, blob.type);
+      await sendRow({ kind: "video", media_url: url, body: caption, media_quality: quality });
+      $("input").value = "";
+      autosize();
+    } catch (e) {
+      toast(e && e.message === "NO_TRANSCODE" ? "Сжатие на этом устройстве не работает" : errMsg(e));
+    }
+  }
+
+  async function sendAudio(f, caption) {
+    const c = curChat();
+    if (!c || !canPost(c)) return;
+    try {
+      if (f.size > 20 * MB) throw new Error("Аудио больше 20 МБ");
+      toast("Загружаю аудио…");
+      const ext = ((f.name.split(".").pop() || "mp3").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5)) || "mp3";
+      const url = await uploadMedia(f, ext, f.type);
+      const title = f.name.replace(/\.[^.]+$/, "").slice(0, 200) || "Аудио";
+      await sendRow({ kind: "audio", media_url: url, body: caption, media_name: title });
+      $("input").value = "";
+      autosize();
+    } catch (e) {
+      toast(errMsg(e));
+    }
+  }
+
+  function videoCard(m) {
+    const box = h("div", { class: "vcard", role: "button", tabindex: "0", "aria-label": "Смотреть видео" });
+    box.appendChild(h("video", { src: m.media_url, preload: "metadata", muted: true, playsinline: true }));
+    box.appendChild(h("span", { class: "vplay", text: "Смотреть" }));
+    if (m.media_quality) box.appendChild(h("span", { class: "vq", text: qualityLabel(m.media_quality) }));
+    box.addEventListener("click", function (e) {
+      e.stopPropagation();
+      lightbox(m.media_url);
+    });
+    return box;
+  }
+
+  function audioCard(m) {
+    return h("div", { class: "acard" },
+      h("div", { class: "atitle", text: mediaName(m) || "Аудио" }),
+      h("audio", { src: m.media_url, controls: true, preload: "metadata" }));
   }
 
   function lightbox(url) {
@@ -1514,7 +1624,7 @@
       av.style.background = "linear-gradient(135deg," + bg + ",#c026d3)";
       av.appendChild(document.createTextNode(initial(pName(p))));
     }
-    const online = S.online.has(p.id);
+    const online = isOn(p.id);
     const body = $("pp-body");
     body.replaceChildren();
     body.appendChild(h("div", { class: "pp-name", text: pName(p) }));
@@ -1920,7 +2030,7 @@
         const p = S.profiles.get(mem.user_id);
         if (!p) return;
         const roleText = mem.role === "owner" ? "владелец" : mem.role === "admin" ? "админ" : "участник";
-        b.appendChild(rowBtn(avEl({ seed: p.id, name: pName(p), url: p.avatar_url, animated: p.avatar_animated, online: S.online.has(p.id), size: "sm" }),
+        b.appendChild(rowBtn(avEl({ seed: p.id, name: pName(p), url: p.avatar_url, animated: p.avatar_animated, online: isOn(p.id), size: "sm" }),
           pName(p) + (mem.user_id === S.me.id ? " (вы)" : ""), roleText, function () { openProfilePage(p.id); }));
       });
       if (isAdmin) {
@@ -2186,7 +2296,7 @@
     });
     $("sticker-btn").addEventListener("click", function () { togglePanel("stickers"); });
     $("smile-btn").addEventListener("click", function () { togglePanel("smiles"); });
-    $("attach-btn").addEventListener("click", function () { pickFile("image/*,video/mp4,video/webm", handleAttach); });
+    $("attach-btn").addEventListener("click", function () { pickFile("image/*,video/*,audio/*", handleAttach); });
     $("composer").addEventListener("submit", function (e) { e.preventDefault(); submitText(); });
     $("input").addEventListener("input", function () { autosize(); throttleTyping(); });
     $("input").addEventListener("keydown", function (e) {

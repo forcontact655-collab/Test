@@ -69,9 +69,11 @@ create table public.messages (
   id uuid primary key default gen_random_uuid(),
   chat_id uuid not null references public.chats(id) on delete cascade,
   sender_id uuid not null references auth.users(id) on delete cascade,
-  kind text not null default 'text' check (kind in ('text','image','sticker','video')),
+  kind text not null default 'text' check (kind in ('text','image','sticker','video','audio')),
   body text not null default '' check (char_length(body) <= 4096),
   media_url text,
+  media_name text check (char_length(media_name) <= 1000),
+  media_quality text check (media_quality in ('orig','720p','480p','360p')),
   reply_to uuid references public.messages(id) on delete set null,
   forwarded_from text,
   edited_at timestamptz,
@@ -231,6 +233,8 @@ revoke update on public.chat_members from authenticated, anon;
 grant update (pinned, muted, last_read_at) on public.chat_members to authenticated;
 revoke update on public.messages from authenticated, anon;
 grant update (body, deleted_at) on public.messages to authenticated;
+grant insert (media_name, media_quality) on public.messages to authenticated;
+grant select (media_name, media_quality) on public.messages to authenticated;
 
 create policy messages_select on public.messages for select to authenticated using (public.is_member(chat_id));
 create policy messages_insert on public.messages for insert to authenticated with check (

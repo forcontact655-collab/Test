@@ -88,7 +88,7 @@
 
         <form id="composer" class="composer">
           <button id="attach-btn" class="icon-btn" type="button" aria-label="Прикрепить фото или видео"><svg viewBox="0 0 24 24"><path d="M21 11l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/></svg></button>
-          <input id="picker" type="file" accept="image/*,video/mp4,video/webm" hidden>
+          <input id="picker" type="file" accept="image/*,video/*,audio/*" hidden>
           <button id="sticker-btn" class="icon-btn" type="button" aria-label="Стикеры"><svg viewBox="0 0 24 24"><path d="M15 3H6a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h9l7-7V6a3 3 0 0 0-3-3z"/><path d="M15 21v-4a2 2 0 0 1 2-2h4"/></svg></button>
           <div class="input-wrap">
             <textarea id="input" rows="1" maxlength="4096" placeholder="Сообщение" autocomplete="off"></textarea>
@@ -136,6 +136,7 @@
   <script src="vendor/supabase.js"></script>
   <script src="e2e.js"></script>
   <script src="store.js"></script>
+  <script src="media.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
