@@ -185,7 +185,7 @@ jobs:
         working-directory: ${{ runner.temp }}/echo
         run: |
           npm init -y > /dev/null
-          npm install @capacitor/core@8.5.3 @capacitor/cli@8.5.3 @capacitor/android@8.5.3 @capacitor/app@8.1.2 @capacitor/camera@8.2.6
+          npm install @capacitor/core@8.5.3 @capacitor/cli@8.5.3 @capacitor/android@8.5.3 @capacitor/app@8.1.2 @capacitor/camera@8.2.6 @capacitor/local-notifications@8.3.1
 
       - name: Generate Android project
         working-directory: ${{ runner.temp }}/echo
@@ -207,6 +207,14 @@ jobs:
           sed -i '0,/<\/activity>/s//<intent-filter><action android:name="android.intent.action.VIEW" \/><category android:name="android.intent.category.DEFAULT" \/><category android:name="android.intent.category.BROWSABLE" \/><data android:scheme="com.forcontact655.echo" \/><\/intent-filter><\/activity>/' "$f"
           grep -q 'android:scheme="com.forcontact655.echo"' "$f"
           grep -n "scheme" "$f"
+
+      - name: Allow notifications on Android 13+
+        working-directory: ${{ runner.temp }}/echo
+        run: |
+          f=android/app/src/main/AndroidManifest.xml
+          sed -i '0,/<application/s//<uses-permission android:name="android.permission.POST_NOTIFICATIONS" \/><application/' "$f"
+          grep -q 'android.permission.POST_NOTIFICATIONS' "$f"
+          grep -n "POST_NOTIFICATIONS" "$f"
 
       - name: Generate launcher icons
         run: |
