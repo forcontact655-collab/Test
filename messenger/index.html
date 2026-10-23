@@ -2,9 +2,9 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-  <meta name="theme-color" content="#17212b">
-  <meta name="description" content="Gemgram: мессенджер в стиле Telegram, демо-версия с хранением на устройстве">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#140d26">
+  <meta name="description" content="Gemgram: мессенджер с личными чатами, группами, каналами, стикерами и статусами">
   <title>Gemgram</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" href="icon.png">
@@ -12,57 +12,90 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="app">
-    <aside id="side">
-      <header class="side-head">
-        <button id="menu-btn" class="icon-btn" type="button" aria-label="Меню"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
-        <label class="search-box"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg><input id="search" type="search" placeholder="Поиск" autocomplete="off"></label>
+  <div id="boot" class="boot"><div class="boot-logo">G</div><div class="boot-text">Gemgram</div></div>
+
+  <section id="auth" class="auth hidden">
+    <div class="orb o1"></div><div class="orb o2"></div><div class="orb o3"></div>
+    <div class="auth-card">
+      <div class="auth-logo">G</div>
+      <h1 class="auth-title">Gemgram</h1>
+      <p class="auth-sub">Сообщения в реальном времени</p>
+      <div class="seg" id="auth-seg">
+        <button type="button" class="seg-btn on" data-mode="login">Вход</button>
+        <button type="button" class="seg-btn" data-mode="register">Регистрация</button>
+        <span class="seg-ink"></span>
+      </div>
+      <form id="auth-form" class="auth-form" autocomplete="on">
+        <label class="field"><span>Username</span><input id="a-user" type="text" autocomplete="username" required minlength="3" maxlength="32" pattern="[a-zA-Z0-9_]{3,32}" placeholder="например, alex_99"></label>
+        <label class="field reg-only hidden"><span>Имя</span><input id="a-name" type="text" autocomplete="nickname" maxlength="64" placeholder="Как тебя показывать"></label>
+        <label class="field"><span>Пароль</span><input id="a-pass" type="password" autocomplete="current-password" required minlength="6" maxlength="72" placeholder="минимум 6 символов"></label>
+        <button id="a-submit" class="btn-primary" type="submit">Войти</button>
+        <p class="auth-note">Почта не нужна. Чаты и медиа лежат на сервере Supabase, сообщения доходят сразу всем участникам.</p>
+      </form>
+    </div>
+  </section>
+
+  <div id="app" class="app hidden">
+    <aside id="side" class="side">
+      <header class="side-top">
+        <button id="me-btn" class="icon-btn avatar-btn" type="button" aria-label="Профиль"></button>
+        <div class="brand">Gemgram</div>
+        <button id="settings-btn" class="icon-btn" type="button" aria-label="Настройки"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
         <button id="new-btn" class="icon-btn" type="button" aria-label="Новый чат"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
       </header>
-      <nav id="folders" class="folders"></nav>
-      <div id="chats" class="chats"></div>
+      <label class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg><input id="search" type="search" placeholder="Поиск людей и сообщений" autocomplete="off"></label>
+      <nav id="tabs" class="tabs"></nav>
+      <div id="list" class="list"></div>
     </aside>
 
-    <main id="main">
-      <div id="empty" class="empty">
-        <div class="empty-card">
-          <div class="empty-logo">G</div>
-          <div class="empty-title">Gemgram</div>
-          <div class="empty-sub">Выбери чат слева или создай новый</div>
+    <main id="main" class="main">
+      <div id="welcome" class="welcome">
+        <div class="welcome-card">
+          <div class="welcome-logo">G</div>
+          <div class="welcome-title">Выбери чат</div>
+          <div class="welcome-sub">или найди человека через поиск и начни переписку</div>
         </div>
       </div>
 
-      <div id="chat" class="chat hidden">
+      <section id="chat" class="chat hidden">
         <header class="chat-head">
           <button id="back-btn" class="icon-btn back" type="button" aria-label="Назад"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
-          <div id="chat-avatar" class="avatar sm"></div>
-          <div class="chat-title-box">
-            <div id="chat-title" class="chat-title"></div>
-            <div id="chat-sub" class="chat-sub"></div>
-          </div>
+          <button id="chat-open-info" class="chat-title-btn" type="button">
+            <span id="chat-av"></span>
+            <span class="chat-title-box">
+              <span id="chat-title" class="chat-title"></span>
+              <span id="chat-sub" class="chat-sub"></span>
+            </span>
+          </button>
           <button id="chat-search-btn" class="icon-btn" type="button" aria-label="Поиск в чате"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg></button>
           <button id="chat-menu-btn" class="icon-btn" type="button" aria-label="Меню чата"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
         </header>
+
         <div id="chat-search" class="chat-search hidden">
-          <input id="chat-search-input" type="search" placeholder="Поиск в чате" autocomplete="off">
-          <span id="chat-search-count"></span>
+          <input id="chat-search-input" type="search" placeholder="Поиск в этом чате" autocomplete="off">
+          <button id="chat-search-close" class="icon-btn" type="button" aria-label="Закрыть поиск"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
         </div>
-        <div class="msgs-wrap">
-          <div id="messages" class="messages"></div>
-          <button id="to-bottom" class="to-bottom hidden" type="button" aria-label="Вниз"><svg viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button>
+
+        <div class="timeline-wrap">
+          <div id="timeline" class="timeline"></div>
+          <button id="down-btn" class="down-btn hidden" type="button" aria-label="Вниз"><svg viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button>
         </div>
-        <div id="reply-bar" class="bar hidden"></div>
-        <div id="edit-bar" class="bar hidden"></div>
-        <div id="readonly" class="readonly hidden">В канале писать могут только админы</div>
-        <div id="emoji-pick" class="emoji-pick hidden"></div>
+
+        <div id="bars" class="bars"></div>
+        <div id="readonly" class="readonly hidden">В канале пишут только администраторы</div>
+        <div id="panel" class="panel hidden"></div>
+
         <form id="composer" class="composer">
-          <button id="attach-btn" class="icon-btn" type="button" aria-label="Прикрепить фото"><svg viewBox="0 0 24 24"><path d="M21 11l-8.5 8.5a5 5 0 01-7-7L14 4a3.5 3.5 0 015 5l-8.5 8.5a2 2 0 01-3-3L15 7"/></svg></button>
-          <input id="file" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/heic" hidden>
-          <textarea id="input" rows="1" placeholder="Сообщение" maxlength="4096"></textarea>
-          <button id="emoji-btn" class="icon-btn" type="button" aria-label="Смайлы"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5c1 1.2 2 1.8 3.5 1.8s2.5-.6 3.5-1.8M9 9.5h.01M15 9.5h.01"/></svg></button>
+          <button id="attach-btn" class="icon-btn" type="button" aria-label="Прикрепить фото или видео"><svg viewBox="0 0 24 24"><path d="M21 11l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/></svg></button>
+          <input id="picker" type="file" accept="image/*,video/mp4,video/webm" hidden>
+          <button id="sticker-btn" class="icon-btn" type="button" aria-label="Стикеры"><svg viewBox="0 0 24 24"><path d="M15 3H6a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h9l7-7V6a3 3 0 0 0-3-3z"/><path d="M15 21v-4a2 2 0 0 1 2-2h4"/></svg></button>
+          <div class="input-wrap">
+            <textarea id="input" rows="1" maxlength="4096" placeholder="Сообщение" autocomplete="off"></textarea>
+            <button id="smile-btn" class="icon-btn small" type="button" aria-label="Смайлы"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5c1 1.2 2 1.8 3.5 1.8s2.5-.6 3.5-1.8M9 9.5h.01M15 9.5h.01"/></svg></button>
+          </div>
           <button id="send-btn" class="send-btn" type="submit" aria-label="Отправить"><svg viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-3-7z"/></svg></button>
         </form>
-      </div>
+      </section>
     </main>
   </div>
 
@@ -70,15 +103,15 @@
 
   <div id="sheet" class="sheet hidden">
     <div class="sheet-card">
-      <div class="sheet-head">
-        <b id="sheet-title"></b>
-        <button id="sheet-close" class="icon-btn" type="button" aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-      </div>
+      <header class="sheet-head"><b id="sheet-title"></b><button id="sheet-x" class="icon-btn" type="button" aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
       <div id="sheet-body" class="sheet-body"></div>
     </div>
   </div>
 
+  <div id="lightbox" class="lightbox hidden"></div>
   <div id="toasts" class="toasts"></div>
+
+  <script src="vendor/supabase.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
