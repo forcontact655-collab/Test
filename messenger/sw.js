@@ -1,4 +1,4 @@
-const CACHE = "echo-v4";
+const CACHE = "echo-v5";
 const SHELL = ["./", "index.html", "style.css", "app.js", "vendor/supabase.js", "manifest.webmanifest", "icon.png", "e2e.js", "store.js"];
 
 self.addEventListener("install", function (e) {
