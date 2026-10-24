@@ -68,9 +68,12 @@ jobs:
         run: |
           npx cap add android
           gradle_file=android/app/build.gradle
-          sed -i -E "s/versionCode [0-9]+/versionCode ${GITHUB_RUN_NUMBER}/" "$gradle_file"
+          # versionCode выше, чем у прежних сборок из другого воркфлоу,
+          # иначе Android откажется ставить APK поверх уже установленного.
+          code=$((1000 + GITHUB_RUN_NUMBER))
+          sed -i -E "s/versionCode [0-9]+/versionCode ${code}/" "$gradle_file"
           sed -i -E "s/versionName \"[^\"]*\"/versionName \"1.0.${GITHUB_RUN_NUMBER}\"/" "$gradle_file"
-          grep -q "versionCode ${GITHUB_RUN_NUMBER}" "$gradle_file"
+          grep -q "versionCode ${code}" "$gradle_file"
           grep -n "version" "$gradle_file" || true
           npx cap sync android
 
@@ -158,7 +161,7 @@ jobs:
           echo "APK badging: $line"
           vn=$(printf '%s' "$line" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
           vc=$(printf '%s' "$line" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
-          [ -n "$vn" ] || { vn="1.0.${GITHUB_RUN_NUMBER}"; vc="${GITHUB_RUN_NUMBER}"; }
+          [ -n "$vn" ] || { vn="1.0.${GITHUB_RUN_NUMBER}"; vc="$((1000 + GITHUB_RUN_NUMBER))"; }
           echo "APK_VERSION_NAME=$vn" >> "$GITHUB_ENV"
           echo "APK_VERSION_CODE=$vc" >> "$GITHUB_ENV"
 
