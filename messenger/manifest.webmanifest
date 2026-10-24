@@ -1,0 +1,16 @@
+{
+  "name": "Echo",
+  "short_name": "Echo",
+  "description": "Echo: мессенджер с личными чатами, группами, каналами и стикерами",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#07040e",
+  "theme_color": "#0b0716",
+  "lang": "ru",
+  "icons": [
+    { "src": "icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" },
+    { "src": "icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "maskable" }
+  ]
+}
