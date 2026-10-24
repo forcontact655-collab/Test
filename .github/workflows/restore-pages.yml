@@ -16,6 +16,9 @@ jobs:
   restore:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Restore release
         env:
           GH_TOKEN: ${{ github.token }}
