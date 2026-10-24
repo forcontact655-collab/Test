@@ -1,0 +1,65 @@
+name: Restore previous Pages build
+
+# Временный воркфлоу: возвращает на GitHub Pages ровно ту сборку сайта,
+# которая была опубликована до правок (артефакт запуска 40005018230),
+# и пересоздаёт релиз echo-latest из прежнего APK. После отработки удаляется.
+on:
+  push:
+    branches:
+      - arena/d02175e8-test
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: restore-pages
+  cancel-in-progress: true
+
+jobs:
+  restore:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download previous site build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p site
+          gh api "repos/${{ github.repository }}/actions/artifacts/12523948424/zip" > old-site.zip
+          unzip -q old-site.zip -d site
+          echo "--- содержимое восстановленной сборки:"
+          find site -maxdepth 2 | head -40
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Restore echo-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p out
+          gh api "repos/${{ github.repository }}/actions/artifacts/12523718937/zip" > old-echo.zip
+          unzip -q old-echo.zip -d out
+          find out -maxdepth 1 -type f
+          cat out/version.json || true
+          gh release delete echo-latest --cleanup-tag --yes || true
+          gh release create echo-latest out/echo.apk out/version.json \
+            --title "Echo APK (latest build)" \
+            --notes "Сборка из коммита a7dffc2 (arena/9e90206b-test). Восстановлено после отката." \
+            --prerelease \
+            --target a7dffc250d5b03731961352886338de70db99820
