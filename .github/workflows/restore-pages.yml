@@ -44,6 +44,26 @@ jobs:
           echo "--- корень сайта:"
           ls -la site | head -30
           test -f site/index.html || { echo "index.html не найден — нечего деплоить"; exit 1; }
+          {
+            echo "== dl:"; ls -la dl | head -20
+            echo "== tar:"; tar -tf dl/artifact.tar 2>/dev/null | head -40 || true
+            echo "== site:"; ls -la site | head -25
+          } > diag.txt
+
+      - name: Save diagnostics
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          content=$(base64 -w0 diag.txt)
+          sha=$(gh api "repos/${{ github.repository }}/contents/diag.txt" -q .sha 2>/dev/null || true)
+          if [ -n "$sha" ]; then
+            gh api -X PUT "repos/${{ github.repository }}/contents/diag.txt" \
+              -f message="diag" -f content="$content" -f branch="${GITHUB_REF_NAME}" -f sha="$sha" > /dev/null || true
+          else
+            gh api -X PUT "repos/${{ github.repository }}/contents/diag.txt" \
+              -f message="diag" -f content="$content" -f branch="${GITHUB_REF_NAME}" > /dev/null || true
+          fi
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
