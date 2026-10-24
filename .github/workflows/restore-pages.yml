@@ -39,3 +39,14 @@ jobs:
             gh release view echo-latest --json tagName,assets 2>&1
           } > rel.txt 2>&1
           cat rel.txt
+
+      - name: Publish report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          content=$(base64 -w0 rel.txt 2>/dev/null || echo "нет отчёта" | base64 -w0)
+          sha=$(gh api "repos/${{ github.repository }}/contents/rel.txt" -q .sha 2>/dev/null || true)
+          args=(-X PUT "repos/${{ github.repository }}/contents/rel.txt" -f message="restore report" -f content="$content" -f branch="${GITHUB_REF_NAME}")
+          if [ -n "$sha" ]; then args+=(-f sha="$sha"); fi
+          gh api "${args[@]}" > /dev/null || true
