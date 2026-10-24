@@ -1,8 +1,7 @@
-name: Restore previous Pages build
+name: Restore previous release
 
-# Временный воркфлоу: возвращает на GitHub Pages ровно ту сборку сайта,
-# которая была опубликована до правок (артефакт запуска 40005018230),
-# и пересоздаёт релиз echo-latest из прежнего APK. После отработки удаляется.
+# Временный воркфлоу: возвращает релиз echo-latest с прежним APK (сборка 1.0.71
+# из ветки arena/9e90206b-test). После отработки удаляется вместе с отчётом.
 on:
   push:
     branches:
@@ -12,89 +11,31 @@ on:
 permissions:
   actions: read
   contents: write
-  pages: write
-  id-token: write
-
-concurrency:
-  group: restore-pages
-  cancel-in-progress: true
 
 jobs:
   restore:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Download previous site build
+      - name: Restore release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Артефакт pages-деплоя — это zip с artifact.tar внутри, поэтому
-          # распаковываем в два шага и проверяем, что index.html на месте.
-          mkdir -p dl site
-          gh api "repos/${{ github.repository }}/actions/artifacts/12523948424/zip" > old-site.zip
-          unzip -q old-site.zip -d dl
-          ls -la dl
-          if [ -f dl/artifact.tar ]; then
-            tar -xf dl/artifact.tar -C site
-          else
-            cp -r dl/. site/
-          fi
-          echo "--- корень сайта:"
-          ls -la site | head -30
-          test -f site/index.html || { echo "index.html не найден — нечего деплоить"; exit 1; }
+          set +e
           {
-            echo "== dl:"; ls -la dl | head -20
-            echo "== tar:"; tar -tf dl/artifact.tar 2>/dev/null | head -40 || true
-            echo "== site:"; ls -la site | head -25
-          } > diag.txt
-
-      - name: Save diagnostics
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          content=$(base64 -w0 diag.txt)
-          sha=$(gh api "repos/${{ github.repository }}/contents/diag.txt" -q .sha 2>/dev/null || true)
-          if [ -n "$sha" ]; then
-            gh api -X PUT "repos/${{ github.repository }}/contents/diag.txt" \
-              -f message="diag" -f content="$content" -f branch="${GITHUB_REF_NAME}" -f sha="$sha" > /dev/null || true
-          else
-            gh api -X PUT "repos/${{ github.repository }}/contents/diag.txt" \
-              -f message="diag" -f content="$content" -f branch="${GITHUB_REF_NAME}" > /dev/null || true
-          fi
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-
-      - name: Restore echo-latest release
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p out
-          gh api "repos/${{ github.repository }}/actions/artifacts/12523718937/zip" > old-echo.zip
-          unzip -q old-echo.zip -d out
-          find out -maxdepth 1 -type f
-          cat out/version.json || true
-          gh release delete echo-latest --cleanup-tag --yes || true
-          gh release create echo-latest out/echo.apk out/version.json \
-            --title "Echo APK (latest build)" \
-            --notes "Сборка из коммита a7dffc2 (arena/9e90206b-test). Восстановлено после отката." \
-            --prerelease \
-            --target a7dffc250d5b03731961352886338de70db99820 \
-            || gh release create echo-latest out/echo.apk out/version.json \
-                 --title "Echo APK (latest build)" \
-                 --notes "Сборка из коммита a7dffc2 (arena/9e90206b-test). Восстановлено после отката." \
-                 --prerelease
-          gh release view echo-latest --json tagName,assets -q '.tagName, (.assets[].name)'
+            echo "== скачиваю прежний APK"
+            mkdir -p out
+            gh api "repos/${{ github.repository }}/actions/artifacts/12523718937/zip" > old.zip && unzip -q old.zip -d out
+            ls -la out
+            echo "== version.json"; cat out/version.json; echo
+            echo "== удаляю текущий релиз"
+            gh release delete echo-latest --cleanup-tag --yes 2>&1
+            echo "== создаю релиз заново"
+            gh release create echo-latest out/echo.apk out/version.json \
+              --title "Echo APK (latest build)" \
+              --notes "Сборка из коммита a7dffc2 (arena/9e90206b-test). Восстановлено после отката." \
+              --prerelease \
+              --target a7dffc250d5b03731961352886338de70db99820 2>&1
+            echo "== итог"
+            gh release view echo-latest --json tagName,assets 2>&1
+          } > rel.txt 2>&1
+          cat rel.txt
