@@ -1,0 +1,247 @@
+name: Echo APK and site
+
+on:
+  push:
+    branches:
+      - main
+      - 'arena/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: echo-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    name: Собрать APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Collect web files
+        run: |
+          mkdir -p "$RUNNER_TEMP/echo/www/vendor"
+          cp messenger/index.html messenger/style.css messenger/app.js messenger/e2e.js \
+             messenger/store.js messenger/media.js messenger/demo.js messenger/sw.js \
+             messenger/manifest.webmanifest messenger/icon.png "$RUNNER_TEMP/echo/www/"
+          cp messenger/vendor/supabase.js "$RUNNER_TEMP/echo/www/vendor/"
+          cat > "$RUNNER_TEMP/echo/capacitor.config.json" <<'EOF'
+          {
+            "appId": "com.forcontact655.echo",
+            "appName": "Echo",
+            "webDir": "www",
+            "android": { "allowMixedContent": false }
+          }
+          EOF
+          ls -la "$RUNNER_TEMP/echo/www"
+
+      - name: Install Capacitor
+        working-directory: ${{ runner.temp }}/echo
+        run: |
+          npm init -y > /dev/null
+          npm install @capacitor/core@8.5.3 @capacitor/cli@8.5.3 @capacitor/android@8.5.3 \
+                      @capacitor/app@8.1.2 @capacitor/camera@8.2.6 @capacitor/local-notifications@8.3.1
+
+      - name: Generate Android project
+        working-directory: ${{ runner.temp }}/echo
+        run: |
+          npx cap add android
+          gradle_file=android/app/build.gradle
+          sed -i -E "s/versionCode [0-9]+/versionCode ${GITHUB_RUN_NUMBER}/" "$gradle_file"
+          sed -i -E "s/versionName \"[^\"]*\"/versionName \"1.0.${GITHUB_RUN_NUMBER}\"/" "$gradle_file"
+          grep -q "versionCode ${GITHUB_RUN_NUMBER}" "$gradle_file"
+          grep -n "version" "$gradle_file" || true
+          npx cap sync android
+
+      - name: Register app auth scheme
+        working-directory: ${{ runner.temp }}/echo
+        run: |
+          f=android/app/src/main/AndroidManifest.xml
+          python3 - "$f" <<'PY'
+          import sys
+          p = sys.argv[1]
+          s = open(p).read()
+          flt = ('<intent-filter><action android:name="android.intent.action.VIEW" />'
+                 '<category android:name="android.intent.category.DEFAULT" />'
+                 '<category android:name="android.intent.category.BROWSABLE" />'
+                 '<data android:scheme="com.forcontact655.echo" /></intent-filter>')
+          i = s.index('</activity>')
+          s = s[:i] + flt + s[i:]
+          open(p, 'w').write(s)
+          PY
+          grep -q 'android:scheme="com.forcontact655.echo"' "$f" || { echo "scheme не добавлен"; cat "$f"; exit 1; }
+
+      - name: Allow notifications on Android 13+
+        working-directory: ${{ runner.temp }}/echo
+        run: |
+          f=android/app/src/main/AndroidManifest.xml
+          sed -i '0,/<application/s//<uses-permission android:name="android.permission.POST_NOTIFICATIONS" \/><application/' "$f"
+          grep -q 'android.permission.POST_NOTIFICATIONS' "$f"
+
+      - name: Generate launcher icons
+        run: |
+          if ! command -v convert > /dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq imagemagick
+          fi
+          src="$GITHUB_WORKSPACE/messenger/icon.png"
+          res="$RUNNER_TEMP/echo/android/app/src/main/res"
+          for pair in mdpi:48:108 hdpi:72:162 xhdpi:96:216 xxhdpi:144:324 xxxhdpi:192:432; do
+            d=${pair%%:*}; rest=${pair#*:}; l=${rest%%:*}; f=${rest#*:}
+            dir="$res/mipmap-$d"
+            mkdir -p "$dir"
+            rm -f "$dir"/ic_launcher*.webp
+            convert "$src" -resize "${l}x${l}" "$dir/ic_launcher.png"
+            cp "$dir/ic_launcher.png" "$dir/ic_launcher_round.png"
+            convert "$src" -resize "${f}x${f}" "$dir/ic_launcher_foreground.png"
+          done
+          ls -la "$res/mipmap-xxxhdpi"
+
+      - name: Build debug APK
+        working-directory: ${{ runner.temp }}/echo/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Sign APK with stable key
+        if: env.KEYSTORE_B64 != ''
+        working-directory: ${{ runner.temp }}/echo
+        run: |
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.p12"
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          apk=android/app/build/outputs/apk/debug/app-debug.apk
+          "$bt/apksigner" sign --ks "$RUNNER_TEMP/release.p12" --ks-type PKCS12 \
+            --ks-pass env:KEYSTORE_PASS --out "$RUNNER_TEMP/signed.apk" "$apk"
+          mv "$RUNNER_TEMP/signed.apk" "$apk"
+          rm -f "$RUNNER_TEMP/release.p12"
+
+      - name: Check APK contents
+        working-directory: ${{ runner.temp }}/echo
+        run: |
+          apk=android/app/build/outputs/apk/debug/app-debug.apk
+          unzip -l "$apk" > apk-list.txt
+          for f in assets/public/index.html assets/public/app.js assets/public/style.css \
+                   assets/public/demo.js assets/public/vendor/supabase.js; do
+            grep -q "$f" apk-list.txt || { echo "в APK нет $f"; exit 1; }
+          done
+          grep -q 'META-INF/' apk-list.txt
+          ls -la "$apk"
+          du -h "$apk"
+
+      - name: Read APK version
+        run: |
+          apk="$RUNNER_TEMP/echo/android/app/build/outputs/apk/debug/app-debug.apk"
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          tool="$bt/aapt2"; [ -x "$tool" ] || tool="$bt/aapt"
+          line=$("$tool" dump badging "$apk" 2>/dev/null | grep -m1 "^package:" || true)
+          echo "APK badging: $line"
+          vn=$(printf '%s' "$line" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
+          vc=$(printf '%s' "$line" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
+          [ -n "$vn" ] || { vn="1.0.${GITHUB_RUN_NUMBER}"; vc="${GITHUB_RUN_NUMBER}"; }
+          echo "APK_VERSION_NAME=$vn" >> "$GITHUB_ENV"
+          echo "APK_VERSION_CODE=$vc" >> "$GITHUB_ENV"
+
+      - name: Prepare APK file
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          cp "$RUNNER_TEMP/echo/android/app/build/outputs/apk/debug/app-debug.apk" "$RUNNER_TEMP/out/echo.apk"
+          printf '{"versionName":"%s","versionCode":%s,"commit":"%s","built":"%s"}\n' \
+            "$APK_VERSION_NAME" "$APK_VERSION_CODE" "${GITHUB_SHA:0:7}" "$(date -u +%Y-%m-%d)" \
+            > "$RUNNER_TEMP/out/version.json"
+          cat "$RUNNER_TEMP/out/version.json"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: echo-apk
+          path: ${{ runner.temp }}/out
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish APK release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete echo-latest --cleanup-tag --yes || true
+          gh release create echo-latest "$RUNNER_TEMP/out/echo.apk" "$RUNNER_TEMP/out/version.json" \
+            --title "Echo APK (latest build)" \
+            --notes "Сборка из коммита ${GITHUB_SHA:0:7} (${GITHUB_REF_NAME}) от $(date -u +%Y-%m-%d). Обновляется при каждом пуше в ветки arena." \
+            --prerelease \
+            --target "$GITHUB_SHA"
+
+  site:
+    name: Сайт и страница загрузки
+    needs: [apk]
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Необязательный шаг: сохраняем на сайте игру из PR #1, если её ветка ещё жива.
+      - name: Checkout legacy game (optional)
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          ref: arena/9e90206b-test
+          path: legacy
+
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: echo-apk
+          path: dl
+
+      - name: Assemble site
+        run: |
+          mkdir -p site
+          cp -r messenger site/messenger
+          cp -r echo-site/. site/
+          cp dl/echo.apk site/echo.apk
+          mkdir -p site/echo
+          cp dl/echo.apk dl/version.json site/echo/
+          cp echo-site/redirect.html site/echo/index.html
+          if [ -f legacy/index.html ] && [ -f legacy/game.js ]; then
+            mkdir -p site/game
+            cp -r legacy/index.html legacy/style.css legacy/game.js site/game/
+            cp -r legacy/assets site/game/ 2>/dev/null || true
+            [ -f legacy/track.m4a ] && cp legacy/track.m4a site/game/ || true
+            cp legacy/*.pez site/game/ 2>/dev/null || true
+            echo "legacy game copied"
+          fi
+          ls -la site
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
