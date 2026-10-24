@@ -58,6 +58,7 @@ jobs:
         uses: actions/deploy-pages@v4
 
       - name: Restore echo-latest release
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -76,4 +77,4 @@ jobs:
                  --title "Echo APK (latest build)" \
                  --notes "Сборка из коммита a7dffc2 (arena/9e90206b-test). Восстановлено после отката." \
                  --prerelease
-          gh release view echo-latest -q .
+          gh release view echo-latest --json tagName,assets -q '.tagName, (.assets[].name)'
