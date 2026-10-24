@@ -30,11 +30,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p site
+          # Артефакт pages-деплоя — это zip с artifact.tar внутри, поэтому
+          # распаковываем в два шага и проверяем, что index.html на месте.
+          mkdir -p dl site
           gh api "repos/${{ github.repository }}/actions/artifacts/12523948424/zip" > old-site.zip
-          unzip -q old-site.zip -d site
-          echo "--- содержимое восстановленной сборки:"
-          find site -maxdepth 2 | head -40
+          unzip -q old-site.zip -d dl
+          ls -la dl
+          if [ -f dl/artifact.tar ]; then
+            tar -xf dl/artifact.tar -C site
+          else
+            cp -r dl/. site/
+          fi
+          echo "--- корень сайта:"
+          ls -la site | head -30
+          test -f site/index.html || { echo "index.html не найден — нечего деплоить"; exit 1; }
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -62,4 +71,9 @@ jobs:
             --title "Echo APK (latest build)" \
             --notes "Сборка из коммита a7dffc2 (arena/9e90206b-test). Восстановлено после отката." \
             --prerelease \
-            --target a7dffc250d5b03731961352886338de70db99820
+            --target a7dffc250d5b03731961352886338de70db99820 \
+            || gh release create echo-latest out/echo.apk out/version.json \
+                 --title "Echo APK (latest build)" \
+                 --notes "Сборка из коммита a7dffc2 (arena/9e90206b-test). Восстановлено после отката." \
+                 --prerelease
+          gh release view echo-latest -q .
