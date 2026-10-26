@@ -1,7 +1,12 @@
 // «Не оборачивайся» — эпизод на Three.js. Управление для телефона: левая половина экрана — джойстик,
 // правая — свайп для осмотра, короткий тап по правой половине — действие. Клавиатуры нет.
-// Ничего внешнего не грузится: текстуры рисуются на canvas, звуки синтезируются в Web Audio.
+// Модели и текстуры — в models.js (всё рисуется кодом). Звуки синтезируются в Web Audio.
 import * as THREE from './vendor/three.module.js';
+import {
+  MAT, DUST_GEO, bedModel, nightstandModel, tableLampModel, corded_phoneModel, noteModel, sofaModel,
+  bathtubModel, sinkModel, toiletModel, mirrorFrameModel, coatModel, ceilingDrumModel, fluoroModel,
+  windowModel, rugModel, batteryModel, photoFrameModel, doorModel, plinth, stalkerModel, animateStalker,
+} from './models.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -11,6 +16,7 @@ const EYE = 1.6;   // высота глаз
 const H = 2.8;     // высота потолка
 const T = 0.16;    // толщина стен
 const CORR_END = -20; // базовая позиция двери в конце коридора
+const buzz = (ms) => { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* устройство без вибрации */ } };
 
 /* ---------- рендер и камера ---------- */
 const renderer = new THREE.WebGLRenderer({ canvas: $('scene'), antialias: false, powerPreference: 'high-performance' });
@@ -43,15 +49,16 @@ resize();
 /* ---------- состояние ---------- */
 const view = { x: 0, z: 4.6, yaw: 0, pitch: 0 };
 const S = {
-  started: false, paused: false, ended: false, t: 0,
+  started: false, paused: false, ended: false, t: 0, hiddenPause: false,
   flash: true, battery: 100,
   ringAt: -1, ringing: false, ringStop: 0, answered: false,
-  batteryTaken: false, batteryWarned: false,
+  batteryTaken: false,
+  lampOn: false, lampUsed: false, coatChecked: false, switchUsed: false,
   hallT: -1, nudgeSaid: false,
   visitedBath: false, visitedLiving: false, exitedLiving: false, livingEnterT: -1,
   lampSaid: false, stepSaid: false, frozenSaid: false, lockedSaid: false,
   endOffset: 0, doorAng: 0, doorOpening: false, doorDone: false,
-  failing: false,
+  failing: false, stepAcc: 0, figStepAcc: 0,
 };
 let later = [];
 function after(sec, fn) { later.push({ at: S.t + sec, fn }); }
@@ -77,76 +84,25 @@ function closeCard() {
 $('card').addEventListener('pointerdown', (e) => { e.stopPropagation(); closeCard(); });
 function setFade(on) { $('fade').classList.toggle('on', on); }
 
-/* ---------- текстуры (рисуются кодом) ---------- */
-function paintTex(w, h, paint, rx = 1, ry = 1) {
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  paint(c.getContext('2d'), w, h);
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(rx, ry);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
-  return t;
-}
-const wallTex = paintTex(256, 256, (g, w, h) => {
-  g.fillStyle = '#4a4036'; g.fillRect(0, 0, w, h);
-  for (let i = 0; i < 2600; i++) {
-    g.fillStyle = Math.random() < 0.5 ? 'rgba(0,0,0,0.06)' : 'rgba(255,236,200,0.03)';
-    g.fillRect(Math.random() * w, Math.random() * h, 1 + Math.random(), 1 + Math.random());
-  }
-  // потёки у плинтуса
-  for (let x = 0; x < w; x += 40) { g.fillStyle = 'rgba(0,0,0,0.12)'; g.fillRect(x, h * 0.85, 2, h * 0.15); }
-}, 2, 1);
-const floorTex = paintTex(256, 256, (g, w, h) => {
-  g.fillStyle = '#2e2119'; g.fillRect(0, 0, w, h);
-  for (let y = 0; y < h; y += 32) {
-    g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(0, y, w, 2);
-    for (let i = 0; i < 30; i++) { g.fillStyle = 'rgba(0,0,0,' + (Math.random() * 0.2).toFixed(3) + ')'; g.fillRect(Math.random() * w, y + 4, 20 + Math.random() * 80, 1); }
-  }
-}, 4, 14);
-// фото: семья на пляже; четвёртый силуэт почти сливается с фоном
-const photoTex = paintTex(256, 192, (g, w, h) => {
-  g.fillStyle = '#c9b89a'; g.fillRect(0, 0, w, h);
-  g.fillStyle = '#7a8fa3'; g.fillRect(0, 0, w, h * 0.55);
-  g.fillStyle = '#d8c7a2'; g.fillRect(0, h * 0.55, w, h * 0.45);
-  const fig = (x, y, s, col) => {
-    g.fillStyle = col;
-    g.beginPath(); g.arc(x, y, 9 * s, 0, TAU); g.fill();
-    g.fillRect(x - 12 * s, y + 9 * s, 24 * s, 46 * s);
-  };
-  fig(70, 80, 1.0, '#3b3026');
-  fig(120, 74, 1.05, '#4a3b2d');
-  fig(176, 84, 0.9, '#2b2a2e');
-  fig(214, 66, 0.9, 'rgba(10,8,12,0.85)');
-}, 1, 1);
-const matWall = new THREE.MeshStandardMaterial({ map: wallTex, color: 0xb8a895, roughness: 0.95 });
-const matFloor = new THREE.MeshStandardMaterial({ map: floorTex, color: 0xa08474, roughness: 0.85 });
-const matCeil = new THREE.MeshStandardMaterial({ color: 0x1c1a1f, roughness: 1 });
-const matDark = new THREE.MeshStandardMaterial({ color: 0x120d0a, roughness: 0.9 });
-const matPaper = new THREE.MeshStandardMaterial({ color: 0xcbbd9f, roughness: 1 });
-const matMirror = new THREE.MeshStandardMaterial({ color: 0x0b0b10, metalness: 1, roughness: 0.06 });
-const matFig = new THREE.MeshStandardMaterial({ color: 0x050406, roughness: 1 });
-const matDust = new THREE.MeshBasicMaterial({ color: 0xddc8a8, transparent: true, opacity: 0.18 });
-const matDoor = new THREE.MeshStandardMaterial({ color: 0x24160d, roughness: 0.8 });
-
-/* ---------- геометрия ---------- */
-const floor = new THREE.Mesh(new THREE.PlaneGeometry(16, 60), matFloor);
+/* ---------- геометрия комнат ---------- */
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(16, 60), MAT.floor);
 floor.rotation.x = -Math.PI / 2; floor.position.set(0, 0, -20); floor.receiveShadow = true; scene.add(floor);
-const ceil = new THREE.Mesh(new THREE.PlaneGeometry(16, 60), matCeil);
+const ceil = new THREE.Mesh(new THREE.PlaneGeometry(16, 60), MAT.ceil);
 ceil.rotation.x = Math.PI / 2; ceil.position.set(0, H, -20); scene.add(ceil);
 
-const colliders = []; // статичные стены {x0,x1,z0,z1}
+const colliders = []; // статичные препятствия {x0,x1,z0,z1}
+function addCollider(x0, x1, z0, z1) { colliders.push({ x0, x1, z0, z1 }); }
 function box(x0, x1, y0, y1, z0, z1, mat, opts = {}) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), mat);
   m.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
   m.castShadow = true; m.receiveShadow = true;
   (opts.parent || scene).add(m);
-  if (opts.collide) colliders.push({ x0, x1, z0, z1 });
+  if (opts.collide) addCollider(x0, x1, z0, z1);
   return m;
 }
-const wallX = (x, za, zb) => box(x - T / 2, x + T / 2, 0, H, Math.min(za, zb), Math.max(za, zb), matWall, { collide: true });
-const wallZ = (xa, xb, z) => box(Math.min(xa, xb), Math.max(xa, xb), 0, H, z - T / 2, z + T / 2, matWall, { collide: true });
+const wallX = (x, za, zb, mat = MAT.wall) => box(x - T / 2, x + T / 2, 0, H, Math.min(za, zb), Math.max(za, zb), mat, { collide: true });
+const wallZ = (xa, xb, z, mat = MAT.wall) => box(Math.min(xa, xb), Math.max(xa, xb), 0, H, z - T / 2, z + T / 2, mat, { collide: true });
+function at(obj, x, y, z, rotY = 0) { obj.position.set(x, y, z); obj.rotation.y = rotY; scene.add(obj); return obj; }
 
 // спальня x[-3,3] z[0,6]
 wallZ(-3.1, 3.1, 6.1); wallX(-3.1, 0, 6.1); wallX(3.1, 0, 6.1);
@@ -155,33 +111,50 @@ wallZ(-3.1, -1.2, 0); wallZ(1.2, 3.1, 0);
 wallX(-1.2, -10, 0); wallX(-1.2, -20, -12);       // левая стена, проём в гостиную z[-12,-10]
 wallX(1.2, -4.6, 0); wallX(1.2, -20, -6);         // правая стена, проём в ванную z[-6,-4.6]
 // ванная x[1.2,3.2] z[-7.5,-3]
-wallZ(1.2, 3.2, -3.0); wallZ(1.2, 3.2, -7.5); wallX(3.2, -7.5, -3.0);
+wallZ(1.2, 3.2, -3.0, MAT.tile); wallZ(1.2, 3.2, -7.5, MAT.tile); wallX(3.2, -7.5, -3.0, MAT.tile);
 // гостиная x[-4.2,-1.2] z[-16,-8]
 wallX(-4.2, -16, -8); wallZ(-4.2, -1.2, -8); wallZ(-4.2, -1.2, -16);
 
-// мебель
-box(-2.6, -0.6, 0, 0.5, 4.0, 5.8, matDark, { collide: true });     // кровать
-box(1.95, 2.45, 0, 0.7, 5.05, 5.55, matDark, { collide: true });   // тумбочка
-box(2.2, 3.0, 0, 0.8, -6.9, -5.9, matDark, { collide: true });     // стол в ванной
-box(-3.9, -2.2, 0, 0.45, -14.6, -12.6, matDark, { collide: true }); // диван в гостиной
-box(2.05, 2.32, 0.7, 0.76, 5.22, 5.45, matFig);                    // телефон
-box(1.9, 2.1, 0.7, 0.705, 5.3, 5.45, matPaper);                    // записка
+/* ---------- мебель и предметы ---------- */
+const BED = at(bedModel(), -1.6, 0, 4.9);
+addCollider(-2.6, -0.6, 4.0, 5.8);
+const NIGHT = at(nightstandModel(), 2.2, 0, 5.3);
+addCollider(1.95, 2.45, 5.05, 5.55);
+const LAMP = at(tableLampModel(), 2.33, 0, 5.1);
+const PHONE = at(corded_phoneModel(), 2.1, 0.6, 5.36, -0.2);
+const NOTE = at(noteModel(), 2.28, 0.6, 5.46);
+at(ceilingDrumModel(), 0, H, 3.0);
+at(windowModel(), -2.98, 0, 2.0);
+const COAT = at(coatModel(), -1.13, 0, -0.9);
+at(photoFrameModel(0.62, 0.46), -1.12, 1.5, -2.6);
+at(rugModel(1.6, 4.5), 0, 0, -5);
+// плинтусы в коридоре
+at(plinth(10, 'z'), -1.1, 0, -5);
+at(plinth(4.6, 'z'), 1.1, 0, -2.3);
+at(plinth(14, 'z'), 1.1, 0, -13);
 
-// зеркало в ванной (на восточной стене)
-const mirror = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.5), matMirror);
-mirror.rotation.y = -Math.PI / 2; mirror.position.set(3.11, 1.5, -5.2); scene.add(mirror);
-// фото на левой стене коридора
-const photo = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.46), new THREE.MeshStandardMaterial({ map: photoTex, roughness: 0.6 }));
-photo.rotation.y = Math.PI / 2; photo.position.set(-1.1, 1.5, -2.6); scene.add(photo);
-// батарейка на столе в ванной
-const battery = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.1, 10), new THREE.MeshStandardMaterial({ color: 0x3a3f4a, metalness: 0.6, roughness: 0.4 }));
-battery.rotation.z = Math.PI / 2;
-battery.position.set(2.6, 0.86, -6.4); scene.add(battery);
-// выключатель (не работает)
-box(-1.19, -1.13, 1.0, 1.4, -1.6, -1.44, matDark);
+// ванная
+const TUB = at(bathtubModel(), 2.2, 0, -6.95);
+addCollider(1.4, 3.0, -7.3, -6.6);
+const SINK = at(sinkModel(), 2.85, 0, -5.2);
+addCollider(2.6, 3.1, -5.41, -4.99);
+const TOILET = at(toiletModel(), 2.1, 0, -3.4);
+addCollider(1.85, 2.35, -3.68, -3.12);
+at(mirrorFrameModel(1.2, 1.5), 3.11, 1.5, -5.2);
+const MIRROR = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.5), MAT.mirror);
+MIRROR.rotation.y = -Math.PI / 2; MIRROR.position.set(3.1, 1.5, -5.2); scene.add(MIRROR);
+const BATTERY = at(batteryModel(), 2.8, 0.93, -5.3);
+at(ceilingDrumModel(), 2.2, H, -5.2);
 
-// растягивающаяся часть коридора: стены между CORR_END и endZ, дверь в конце
-const extL = new THREE.Mesh(new THREE.BoxGeometry(T, H, 1), matWall);
+// гостиная
+const SOFA = at(sofaModel(), -3.45, 0, -14.0);
+addCollider(-4.0, -2.9, -15.1, -12.9);
+
+// выключатель (щиток)
+box(-1.19, -1.13, 1.0, 1.4, -1.6, -1.44, MAT.trim);
+
+// растягивающаяся часть коридора: стены между CORR_END и endZ
+const extL = new THREE.Mesh(new THREE.BoxGeometry(T, H, 1), MAT.wall);
 const extR = extL.clone();
 extL.position.set(-1.2, H / 2, CORR_END); extR.position.set(1.2, H / 2, CORR_END);
 extL.receiveShadow = extR.receiveShadow = true;
@@ -189,13 +162,13 @@ scene.add(extL, extR);
 
 const endGroup = new THREE.Group(); // локальный z = 0 — это текущая дверь
 scene.add(endGroup);
-box(-1.2, -0.6, 0, H, -T / 2, T / 2, matWall, { parent: endGroup });
-box(0.6, 1.2, 0, H, -T / 2, T / 2, matWall, { parent: endGroup });
-box(-0.6, 0.6, 2.2, H, -T / 2, T / 2, matWall, { parent: endGroup });
+box(-1.2, -0.6, 0, H, -T / 2, T / 2, MAT.wall, { parent: endGroup });
+box(0.6, 1.2, 0, H, -T / 2, T / 2, MAT.wall, { parent: endGroup });
+box(-0.6, 0.6, 2.2, H, -T / 2, T / 2, MAT.wall, { parent: endGroup });
 const doorPivot = new THREE.Group();
 doorPivot.position.set(-0.6, 0, 0);
 endGroup.add(doorPivot);
-box(0, 1.2, 0, 2.2, -0.03, 0.03, matDoor, { parent: doorPivot });
+doorPivot.add(doorModel(1.2, 2.2));
 const endGlow = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.8), new THREE.MeshBasicMaterial({ color: 0xfff8ee, transparent: true, opacity: 0 }));
 endGlow.position.set(0, 1.4, -0.5); endGroup.add(endGlow);
 const endLight = new THREE.PointLight(0xfff4e6, 0, 16, 1.6);
@@ -204,21 +177,30 @@ endLight.position.set(0, 1.6, -1.5); endGroup.add(endLight);
 /* ---------- свет ---------- */
 scene.add(new THREE.HemisphereLight(0x1d2435, 0x050302, 0.15));
 const lamps = [];
-function lamp(x, z, color, intensity) {
-  const l = new THREE.PointLight(color, intensity, 7, 1.8);
-  l.position.set(x, 2.45, z);
+function lightPoint(x, y, z, color, intensity, dist = 7, decay = 1.8) {
+  const l = new THREE.PointLight(color, intensity, dist, decay);
+  l.position.set(x, y, z);
   scene.add(l);
-  const fx = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.12), new THREE.MeshBasicMaterial({ color: 0xfff1d0 }));
-  fx.position.set(x, H - 0.03, z);
-  scene.add(fx);
+  return l;
+}
+function lamp(x, z, color, intensity) {
+  const l = lightPoint(x, 2.45, z, color, intensity);
+  at(fluoroModel(), x, H - 0.02, z);
   const o = { light: l, base: intensity, timer: 0, dim: 1, x, z };
   lamps.push(o);
   return o;
 }
-const lampBed = lamp(0, 3, 0xffd9a0, 9);
+const lampBed = { light: lightPoint(0, 2.55, 3.0, 0xffd9a0, 7, 7), base: 7, timer: 0, dim: 1, x: 0, z: 3 };
+lamps.push(lampBed);
 const lampHall1 = lamp(0, -2, 0xffd9a0, 8);
 const lampHall2 = lamp(0, -9, 0xffd9a0, 8);
-const lampBath = lamp(2.2, -5.2, 0xbcd0ff, 5);
+const lampBath = { light: lightPoint(2.2, 2.6, -5.2, 0xbcd0ff, 5, 6), base: 5, timer: 0, dim: 1, x: 2.2, z: -5.2 };
+lamps.push(lampBath);
+// лампа у кровати: включается вручную, сначала мигает
+const lampTable = lightPoint(2.33, 0.95, 5.1, 0xffb070, 0, 4, 1.6);
+// лунный свет через окно
+lightPoint(-2.5, 1.8, 2.0, 0x8ea4d8, 1.2, 6, 2);
+
 // фонарик — прикреплён к камере
 const flash = new THREE.SpotLight(0xffecd0, 60, 18, 0.5, 0.6, 1.8);
 flash.position.set(0.14, -0.14, -0.1);
@@ -232,7 +214,7 @@ flash.shadow.camera.far = 18;
 
 /* ---------- пыль в луче ---------- */
 const DUST = 180;
-const dustMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.006, 3, 2), matDust, DUST);
+const dustMesh = new THREE.InstancedMesh(DUST_GEO, MAT.dust, DUST);
 const dustP = [];
 const _m = new THREE.Matrix4();
 for (let i = 0; i < DUST; i++) {
@@ -253,33 +235,24 @@ function updateDust(dt) {
 }
 
 /* ---------- фигуры ---------- */
-const FIG_START = { x: -2.6, z: -15.2 };
-const figure = new THREE.Group(); // тёмная фигура в гостиной
-const figBody = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 1.05, 4, 10), matFig);
-figBody.position.y = 0.95; figBody.castShadow = true;
-const figHead = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 10), matFig);
-figHead.position.y = 1.95; figHead.castShadow = true;
-figure.add(figBody, figHead);
-figure.position.set(FIG_START.x, 0, FIG_START.z);
-figure.visible = false;
-scene.add(figure);
+const FIG_START = { x: -1.9, z: -15.3 };
+const stalk = stalkerModel();          // в гостиной
+stalk.group.position.set(FIG_START.x, 0, FIG_START.z);
+stalk.group.visible = false;
+scene.add(stalk.group);
 
-const mirrorFig = new THREE.Group(); // отражение в ванной: отстаёт от игрока
-const mfBody = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.95, 4, 10), matFig);
-mfBody.position.y = 0.9;
-const mfHead = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 10), matFig);
-mfHead.position.y = 1.8;
-mirrorFig.add(mfBody, mfHead);
-mirrorFig.visible = false;
-scene.add(mirrorFig);
+const refl = stalkerModel();           // отражение в зеркале ванной
+refl.group.visible = false;
+scene.add(refl.group);
 const lag = { z: 0 };
 
 /* ---------- звук: синтез в Web Audio + позиционирование ---------- */
 const snd = {};
 let audioReady = false;
 let ambHum = null, heartSnd = null, ringSnd = null, buzzSnd = null;
-const phoneAt = new THREE.Object3D(); phoneAt.position.set(2.2, 0.8, 5.3); scene.add(phoneAt);
-const figAt = new THREE.Object3D(); scene.add(figAt);
+const stepPool = [];
+const stalkSteps = [];
+const phoneAt = new THREE.Object3D(); phoneAt.position.set(2.1, 0.8, 5.36); scene.add(phoneAt);
 const lampAt = new THREE.Object3D(); lampAt.position.set(0, 2.2, -9); scene.add(lampAt);
 const doorAt = new THREE.Object3D(); doorAt.position.set(0, 1.1, CORR_END); scene.add(doorAt);
 
@@ -326,11 +299,15 @@ function initAudio() {
   });
   // гудение лампы: 120 Гц с модуляцией, цикл 1 с
   snd.buzz = makeBuf(ctx, 1, (t) => 0.05 * Math.sin(TAU * 120 * t) * (0.7 + 0.3 * Math.sin(TAU * 7 * t)));
+  // шаг: короткий глухой удар с шумом по паркету
+  snd.step = makeBuf(ctx, 0.25, (t) => Math.exp(-t * 40) * (0.5 * Math.sin(TAU * 95 * t) + 0.25 * (Math.random() * 2 - 1)));
 
   ambHum = new THREE.Audio(listener);
   ambHum.setBuffer(snd.hum); ambHum.setLoop(true); ambHum.setVolume(0.1); ambHum.play();
   const room = new THREE.Audio(listener);
   room.setBuffer(snd.room); room.setLoop(true); room.setVolume(0.25); room.play();
+
+  for (let i = 0; i < 3; i++) { const a = new THREE.Audio(listener); a.setBuffer(snd.step); stepPool.push(a); }
 
   ringSnd = new THREE.PositionalAudio(listener);
   ringSnd.setBuffer(snd.ring); ringSnd.setLoop(true); ringSnd.setRefDistance(2); ringSnd.setVolume(0.7);
@@ -338,7 +315,12 @@ function initAudio() {
 
   heartSnd = new THREE.PositionalAudio(listener);
   heartSnd.setBuffer(snd.heart); heartSnd.setLoop(true); heartSnd.setRefDistance(2.5); heartSnd.setVolume(0);
-  figAt.add(heartSnd); heartSnd.play();
+  stalk.group.add(heartSnd); heartSnd.play();
+  for (let i = 0; i < 2; i++) {
+    const a = new THREE.PositionalAudio(listener);
+    a.setBuffer(snd.step); a.setRefDistance(3); a.setVolume(0.6);
+    stalk.group.add(a); stalkSteps.push(a);
+  }
 
   buzzSnd = new THREE.PositionalAudio(listener);
   buzzSnd.setBuffer(snd.buzz); buzzSnd.setLoop(true); buzzSnd.setRefDistance(2); buzzSnd.setVolume(0.08);
@@ -350,31 +332,61 @@ function oneShot(holder, buf, vol = 0.9, ref = 2.5) {
   holder.add(s); s.play();
   return s;
 }
+function playStep(vol) {
+  for (const a of stepPool) if (!a.isPlaying) { a.setVolume(vol); a.play(); return; }
+}
+function playStalkStep() {
+  for (const a of stalkSteps) if (!a.isPlaying) { a.play(); return; }
+}
 
 /* ---------- интерактивные предметы ---------- */
 const uses = [];
 function addUse(x, y, z, label, fn, once = false) { uses.push({ x, y, z, label, fn, once, dead: false }); }
-addUse(2.2, 0.8, 5.33, 'ответить на звонок', () => {
+addUse(2.1, 0.8, 5.36, 'ответить на звонок', () => {
   if (S.answered) return say('Гудков нет. Только тихое дыхание.');
   if (!S.ringing) return say('Телефон молчит.');
   S.answered = true; S.ringing = false; ringSnd.stop();
   oneShot(phoneAt, snd.whisper, 0.9, 2.5);
+  buzz(40);
   after(0.3, () => say('…ты дома?'));
   after(5.0, () => say('Не выходи, пока свет не вернётся.'));
   after(10.5, () => say('Линия молчит. Дыхание в трубке — медленное, как твоё.', 5));
 });
-addUse(1.98, 0.74, 5.18, 'прочитать записку', () => {
+addUse(2.28, 0.65, 5.46, 'прочитать записку', () => {
   openCard('Записка', 'Если в коридоре станет темнее — не оборачивайся. Фонарь держи включённым. Я приду, когда стемнеет окончательно. — Л.');
+});
+addUse(2.33, 0.9, 5.1, 'включить лампу', () => {
+  S.lampOn = !S.lampOn;
+  if (!S.lampUsed) {
+    S.lampUsed = true;
+    lampTable.intensity = 0;
+    after(0.2, () => { lampTable.intensity = 4; });
+    after(0.5, () => { lampTable.intensity = 0; });
+    after(0.8, () => { lampTable.intensity = 4; });
+    after(1.1, () => say('Лампа моргнула дважды и загорелась. Провод вилки давно не в розетке.', 5.5));
+    return;
+  }
+  lampTable.intensity = S.lampOn ? 4 : 0;
+  say(S.lampOn ? 'Тёплый свет. В углах стало темнее.' : 'Лампа погасла.');
 });
 addUse(-1.1, 1.5, -2.6, 'посмотреть фото', () => {
   openCard('Фотография', 'Мама, папа и ты на пляже. Всё правильно. Только за твоей спиной стоит кто-то четвёртый. Ты точно помнишь, что вас было трое.');
 });
-addUse(-1.1, 1.2, -1.5, 'щёлкнуть выключатель', () => say('Щёлкает, но свет не загорается. Его давно нет.'));
+addUse(-1.13, 1.2, -1.5, 'щёлкнуть выключатель', () => {
+  S.switchUsed = true;
+  lampHall1.timer = 0.35; // лампы гаснут на долю секунды
+  lampHall2.timer = 0.35;
+  say('Щёлкает. Лампы в коридоре на секунду гаснут и загораются.');
+});
+addUse(-1.0, 1.0, -0.9, 'проверить карманы пальто', () => {
+  S.coatChecked = true;
+  openCard('Карман пальто', 'Бумажка, сложенная вчетверо: «Не открывай дверь в гостиную, если свет погас сам». Ниже другим почерком: «Ты уже открывал».');
+});
 addUse(3.0, 1.5, -5.2, 'посмотреть в зеркало', () => say('Отражение отстаёт на полсекунды.'));
-addUse(2.6, 0.86, -6.4, 'взять батарейку', () => {
+addUse(2.8, 0.95, -5.3, 'взять батарейку', () => {
   S.batteryTaken = true;
   S.battery = Math.min(100, S.battery + 60);
-  battery.visible = false;
+  BATTERY.visible = false;
   say('Батарейка тёплая. Кто-то только что её выронил.');
 }, true);
 
@@ -419,14 +431,16 @@ function blocked(x, z, r = 0.28) {
   }
   if (!S.doorDone) {
     const dz = CORR_END + S.endOffset;
-    // закрытая дверь: две стенки по бокам и сама дверь на всю ширину проёма
+    // закрытая дверь: перекрывает весь проём коридора
     if (x > -1.2 - r && x < 1.2 + r && z > dz - T / 2 - r && z < dz + T / 2 + r) return true;
   }
   return false;
 }
 function moveWithCollision(dx, dz) {
+  const x0 = view.x, z0 = view.z;
   if (!blocked(view.x + dx, view.z)) view.x += dx;
   if (!blocked(view.x, view.z + dz)) view.z += dz;
+  return Math.hypot(view.x - x0, view.z - z0);
 }
 function teleport(x, z, yaw) {
   view.x = x; view.z = z; view.yaw = yaw ?? view.yaw; view.pitch = 0;
@@ -435,9 +449,10 @@ function fail() {
   if (S.failing) return;
   S.failing = true;
   setFade(true);
+  buzz([120, 80, 200]);
   after(0.9, () => {
     teleport(0, 4.6, 0);
-    figure.position.set(FIG_START.x, 0, FIG_START.z);
+    stalk.group.position.set(FIG_START.x, 0, FIG_START.z);
     say('Ты очнулся в спальне. Ты не слышал, как он подошёл.', 5);
     after(0.9, () => { setFade(false); S.failing = false; });
   });
@@ -511,6 +526,13 @@ function toggleFlash() {
 }
 $('flash').addEventListener('pointerdown', (e) => { e.stopPropagation(); toggleFlash(); });
 
+// в фоне игра ставится на паузу, звук глушится
+document.addEventListener('visibilitychange', () => {
+  S.hiddenPause = document.hidden;
+  const ctx = listener.context;
+  if (ctx && ctx.state) { if (document.hidden) ctx.suspend(); else if (audioReady) ctx.resume(); }
+});
+
 /* ---------- старт ---------- */
 function start() {
   if (S.started) return;
@@ -524,14 +546,18 @@ $('start').addEventListener('pointerdown', (e) => { e.stopPropagation(); start()
 
 /* ---------- цикл ---------- */
 function update(dt) {
-  // движение
+  // движение и шаги
   let ix = input.x, iy = input.y;
   const m = Math.hypot(ix, iy);
   if (m > 1) { ix /= m; iy /= m; }
   const sp = 1.5 * dt;
   const fx = -Math.sin(view.yaw), fz = -Math.cos(view.yaw);
   const rx = Math.cos(view.yaw), rz = -Math.sin(view.yaw);
-  if (ix || iy) moveWithCollision((fx * iy + rx * ix) * sp, (fz * iy + rz * ix) * sp);
+  if (ix || iy) {
+    const moved = moveWithCollision((fx * iy + rx * ix) * sp, (fz * iy + rz * ix) * sp);
+    S.stepAcc += moved;
+    if (S.stepAcc > 0.7) { S.stepAcc = 0; playStep(0.22); }
+  }
 
   // батарея фонаря
   if (S.flash) {
@@ -539,6 +565,7 @@ function update(dt) {
     if (S.battery <= 0) {
       S.flash = false;
       $('flash').classList.add('off');
+      buzz(60);
       say(S.batteryTaken ? 'Фонарь сел.' : 'Фонарь сел. Батарейка должна быть где-то в ванной.', 5);
     }
   }
@@ -546,13 +573,15 @@ function update(dt) {
   flash.intensity += (flashTarget - flash.intensity) * Math.min(1, dt * 12);
   $('bat').firstElementChild.style.transform = `scaleX(${(S.battery / 100).toFixed(3)})`;
 
-  // лампы: случайные вспышки и «мигание по таймеру»
+  // лампы: случайные вспышки и мигание по таймеру
   for (const L of lamps) {
     if (L.timer > 0) { L.timer -= dt; L.dim = 0.05; }
     else L.dim += (1 - L.dim) * Math.min(1, dt * 3);
     if (L.base > 0 && L.timer <= 0 && Math.random() < dt * 0.05) L.timer = rand(0.1, 0.35);
     L.light.intensity = L.base * L.dim * (0.92 + 0.08 * Math.sin(S.t * 13 + L.x * 7));
   }
+  MAT.fluoro.emissiveIntensity = 1.2 * lampHall1.dim;
+  MAT.drumGlow.emissiveIntensity = 1.6 * lampBed.dim;
   // однажды, когда идёшь по коридору и не смотришь на лампу, она мигает
   if (!S.lampSaid && view.z < -7.8 && view.z > -11.5 && !inView(lampHall2.x, 2.4, lampHall2.z, 0.4)) {
     S.lampSaid = true;
@@ -591,39 +620,46 @@ function update(dt) {
     say('Ты вышел. Он стоит в углу и не двигается, пока ты на него светишь.', 5.5);
   }
 
-  // фигура: в гостиной, когда фонарь выключен — идёт к игроку; при свете замирает
+  // фигура: в гостиной, когда фонарь выключен — идёт к игроку; при свете замирает и поворачивает голову
   const figLive = S.visitedLiving && !S.exitedLiving && !S.failing;
-  figure.visible = S.visitedLiving;
+  stalk.group.visible = S.visitedLiving;
   let figDist = 99;
-  if (figLive && inBox(view.x, view.z, ZONE.living)) {
-    const dx = view.x - figure.position.x, dz = view.z - figure.position.z;
+  let walk = 0;
+  const fp = stalk.group.position;
+  if (figLive && inLiving) {
+    const dx = view.x - fp.x, dz = view.z - fp.z;
     figDist = Math.hypot(dx, dz);
     if (!S.flash) {
       if (!S.stepSaid) { S.stepSaid = true; say('Что-то переставляет ногу по паркету.', 4); }
       const step = Math.min(figDist, 0.6 * dt);
-      figure.position.x += (dx / figDist) * step;
-      figure.position.z += (dz / figDist) * step;
-    } else if (!S.frozenSaid && inView(figure.position.x, 1.0, figure.position.z, 0.9)) {
+      fp.x += (dx / figDist) * step;
+      fp.z += (dz / figDist) * step;
+      walk = 1;
+      S.figStepAcc += step;
+      if (S.figStepAcc > 0.6) { S.figStepAcc = 0; playStalkStep(); }
+    } else if (!S.frozenSaid && inView(fp.x, 1.0, fp.z, 0.9)) {
       S.frozenSaid = true;
       say('Он стоит, пока ты на него светишь.', 4.5);
     }
-    figure.lookAt(view.x, 0, view.z);
+    stalk.group.lookAt(view.x, 0, view.z);
     if (figDist < 1.05) fail();
   }
+  const frozen = S.flash && figLive && inView(fp.x, 1.0, fp.z, 0.9);
+  if (stalk.group.visible) animateStalker(stalk, dt, S.t, walk, frozen);
   // сердцебиение: громче, когда фигура ближе
   if (heartSnd) {
     const near = figLive && figDist < 7 ? clamp(1 - figDist / 7, 0, 1) : 0;
     heartSnd.setVolume(near * 0.9);
-    figAt.position.copy(figure.position);
   }
 
   // отражение в ванной: отстаёт от игрока примерно на полсекунды
   const inBath = view.x > 1.2 && view.z > -7.5 && view.z < -3;
-  mirrorFig.visible = inBath;
+  refl.group.visible = inBath;
   if (inBath) {
     lag.z += (view.z - lag.z) * Math.min(1, dt * 2);
-    mirrorFig.position.set(2.7, 0, lag.z);
-    mirrorFig.lookAt(view.x, 0, view.z);
+    refl.group.position.set(2.3, 0, lag.z);
+    refl.group.lookAt(view.x, 0, view.z);
+    animateStalker(refl, dt, S.t, 0, false);
   }
 
   // коридор удлиняется, пока на дверь не смотрят (после посещения гостиной)
@@ -685,7 +721,7 @@ let prev = performance.now();
 function frame(now) {
   const dt = Math.min(0.05, (now - prev) / 1000);
   prev = now;
-  if (S.started && !S.paused && !S.ended) {
+  if (S.started && !S.paused && !S.ended && !S.hiddenPause) {
     S.t += dt;
     update(dt);
   } else {
@@ -701,8 +737,10 @@ requestAnimationFrame(frame);
 
 // для отладки и тестов: не влияет на геймплей
 window.__horror = {
-  S, view, teleport, toggleFlash, start, say,
+  S, view, teleport, toggleFlash, start, say, scene,
+  aim(x, z, tx, ty, tz) { const dx = tx - x, dz = tz - z; view.x = x; view.z = z; view.yaw = Math.atan2(-dx, -dz); view.pitch = Math.atan2(ty - EYE, Math.hypot(dx, dz)); },
   setFlash(on) { S.flash = !!on; $('flash').classList.toggle('off', !S.flash); },
-  get figPos() { return figure.position; },
+  get figPos() { return stalk.group.position; },
+  get reflVisible() { return refl.group.visible; },
   inView,
 };
