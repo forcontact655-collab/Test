@@ -52,15 +52,16 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 
 // Дверь: петля в x=0, полотно уходит в +x, высота h. Лицо +z.
 export function doorUnit(w, h, m = MAT.door) {
+  // тонкое полотно по центру проёма, филёнки чуть выступают, ручка с розеткой
   const g = G();
-  bx(w, h, 0.05, m, w / 2, h / 2, 0, g);
-  for (const [py, ph] of [[h * 0.56, h * 0.36], [h * 0.12, h * 0.36]]) {
-    for (const zz of [0.03, -0.03]) {
-      bx(w - 0.3, ph, 0.02, m, w / 2, py + ph / 2, zz, g);
-    }
+  bx(w, h, 0.045, m, w / 2, h / 2, 0, g);
+  const pw = w - 0.3;
+  for (const [py, ph] of [[h * 0.56, h * 0.34], [h * 0.1, h * 0.36]]) {
+    for (const zz of [0.0235, -0.0235]) bx(pw, ph, 0.01, m, w / 2, py + ph / 2, zz, g);
   }
-  bx(0.06, 0.04, 0.12, MAT.brass, w - 0.12, h * 0.48, 0.07, g);
-  cy(0.02, 0.02, 0.12, MAT.brass, w - 0.12, h * 0.48, 0.03, g).rotation.x = Math.PI / 2;
+  for (const zz of [0.03, -0.03]) cy(0.022, 0.022, 0.012, MAT.brass, w - 0.12, h * 0.48, zz, g, 14).rotation.x = Math.PI / 2;
+  sp(0.018, MAT.brass, w - 0.12, h * 0.48, 0.05, g, 1, 1, 1, 10);
+  sp(0.018, MAT.brass, w - 0.12, h * 0.48, -0.05, g, 1, 1, 1, 10);
   return g;
 }
 
@@ -259,17 +260,21 @@ export function dresser(w = 1.2, d = 0.5, h = 0.9) {
 }
 
 // Кухонный модуль: по оси x, фронт +z, столешка на 0.9 м.
-export function kitchenBase(len) {
+export function kitchenBase(len, cutX = null) {
+  // кухонный модуль: фасады, цоколь, столешка. cutX — вырез под раковину (локальная x).
   const g = G();
+  const hw = 0.24, hd = 0.19;
   bx(len, 0.1, 0.56, MAT.darkMetal, 0, 0.05, 0, g);
-  bx(len, 0.78, 0.6, MAT.oak, 0, 0.5, 0, g, 1.2);
+  holeBoxes(-len / 2, len / 2, -0.3, 0.3, cutX, 0, hw, 0.22, 0.1, 0.78, MAT.oak, g, 1.2);
   const n = Math.max(1, Math.round(len / 0.5));
   for (let i = 0; i < n; i++) {
     const x = -len / 2 + (i + 0.5) * len / n;
+    if (cutX !== null && Math.abs(x - cutX) < hw + 0.05) continue;
     bx(len / n - 0.03, 0.74, 0.02, MAT.oak, x, 0.5, 0.31, g);
     bx(0.02, 0.1, 0.02, MAT.brass, x + (i % 2 ? 0.1 : -0.1), 0.72, 0.335, g);
   }
-  rb(len + 0.04, 0.04, 0.64, MAT.stone, 0, 0.9, 0, g, 0.01);
+  if (cutX === null) rb(len + 0.04, 0.04, 0.64, MAT.stone, 0, 0.9, 0, g, 0.01);
+  else holeBoxes(-len / 2 - 0.02, len / 2 + 0.02, -0.32, 0.32, cutX, 0, hw, hd, 0.88, 0.04, MAT.stone, g, 0.6);
   return g;
 }
 
@@ -307,13 +312,39 @@ export function stove() {
   return g;
 }
 
-export function sinkUnit() {
+// Холст-сплит для выреза: 4 куска вокруг отверстия hx,hz с полуразмерами hw,hd.
+export function holeBoxes(X0, X1, Z0, Z1, hx, hz, hw, hd, y0, h, m, parent, unit = 1.2) {
+  const cb = (a, b, c, d) => { if (b - a > 0.004 && d - c > 0.004) bx(b - a, h, d - c, m, (a + b) / 2, y0 + h / 2, (c + d) / 2, parent, unit); };
+  if (hx === null) return cb(X0, X1, Z0, Z1);
+  cb(X0, hx - hw, Z0, Z1); cb(hx + hw, X1, Z0, Z1);
+  cb(hx - hw, hx + hw, Z0, hz - hd); cb(hx - hw, hx + hw, hz + hd, Z1);
+}
+const basinMat = new THREE.MeshStandardMaterial({ color: 0xb9bec5, metalness: 1, roughness: 0.22, side: THREE.DoubleSide });
+// Раковина: чаша (лат), рант, слив, смеситель-«гусак» с рычагом. Тумба — если vanity.
+// Вырез в столешке делается снаружи через holeBoxes; здесь только чаша и кран.
+export function sinkUnit({ vanity = false, tapZ = -0.3 } = {}) {
   const g = G();
-  cy(0.2, 0.18, 0.02, MAT.steel, 0, 0.93, 0, g, 28).scale.set(1, 1, 0.8);
-  cy(0.19, 0.17, 0.05, MAT.steel, 0, 0.91, 0, g, 28).scale.set(1, 1, 0.8);
-  const tap = G(0, 0.92, -0.25, g);
-  cy(0.012, 0.012, 0.3, MAT.chrome, 0, 0.15, 0, tap, 10);
-  const sp1 = cy(0.01, 0.01, 0.2, MAT.chrome, 0, 0.3, 0.1, tap, 8); sp1.rotation.x = Math.PI / 2;
+  const top = vanity ? 0.87 : 0.92;
+  if (vanity) {
+    holeBoxes(-0.3, 0.3, -0.25, 0.25, 0, 0, 0.24, 0.19, 0, 0.84, MAT.paintWhite, g, 0.5);
+    holeBoxes(-0.3, 0.3, -0.25, 0.25, 0, 0, 0.24, 0.19, 0.84, 0.03, MAT.stone, g, 0.5);
+  }
+  const bowlPts = [new THREE.Vector2(0, -0.12), new THREE.Vector2(0.1, -0.12), new THREE.Vector2(0.16, -0.1), new THREE.Vector2(0.2, -0.02), new THREE.Vector2(0.215, 0.0)];
+  const bowl = new THREE.Mesh(new THREE.LatheGeometry(bowlPts, 36), basinMat);
+  bowl.scale.set(1, 1, 0.8); bowl.position.set(0, top, 0); bowl.castShadow = true; bowl.receiveShadow = true; g.add(bowl);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.21, 0.008, 8, 36), MAT.chrome);
+  rim.rotation.x = Math.PI / 2; rim.scale.set(1, 1, 0.8); rim.position.set(0, top + 0.002, 0); g.add(rim);
+  cy(0.025, 0.025, 0.01, MAT.darkMetal, 0, top - 0.115, 0, g, 16);
+  // смеситель: основание, колонка, гусак, рычаг
+  cy(0.03, 0.035, 0.05, MAT.chrome, 0, top + 0.025, tapZ, g, 16);
+  cy(0.013, 0.013, 0.2, MAT.chrome, 0, top + 0.13, tapZ, g, 12);
+  const spoutCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0, top + 0.22, tapZ), new THREE.Vector3(0, top + 0.27, tapZ + 0.08),
+    new THREE.Vector3(0, top + 0.25, tapZ + 0.22), new THREE.Vector3(0, top + 0.17, tapZ + 0.27),
+  ]);
+  const spout = new THREE.Mesh(new THREE.TubeGeometry(spoutCurve, 24, 0.012, 10), MAT.chrome);
+  spout.castShadow = true; g.add(spout);
+  bx(0.02, 0.03, 0.09, MAT.chrome, 0.03, top + 0.2, tapZ + 0.02, g);
   return g;
 }
 
@@ -378,10 +409,28 @@ export function rug(w, d, color = 0x7a3b30) {
 }
 
 export function mirror(w, h) {
+  // зеркало: металлическое отражающее стекло в тёмной раме
   const g = G();
   bx(w + 0.08, h + 0.08, 0.03, MAT.walnut, 0, 0, 0, g);
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), MAT.glass);
-  m.position.z = 0.02; g.add(m);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), MAT.mirror);
+  m.position.z = 0.017; g.add(m);
+  return g;
+}
+
+// Картина: тёмная рама и холст с процедурным пейзажем.
+export function picture(w = 0.7, h = 0.5) {
+  const g = G();
+  bx(w + 0.08, h + 0.08, 0.03, MAT.walnut, 0, 0, 0, g);
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 180;
+  const x = cv.getContext('2d');
+  const sky = x.createLinearGradient(0, 0, 0, 180);
+  sky.addColorStop(0, '#2f3e52'); sky.addColorStop(0.6, '#c58e5f'); sky.addColorStop(1, '#3b3a2a');
+  x.fillStyle = sky; x.fillRect(0, 0, 256, 180);
+  x.fillStyle = '#26301f'; x.beginPath(); x.moveTo(0, 120); x.quadraticCurveTo(90, 80, 160, 118); x.quadraticCurveTo(210, 100, 256, 124); x.lineTo(256, 180); x.lineTo(0, 180); x.fill();
+  x.fillStyle = 'rgba(255,220,170,0.8)'; x.beginPath(); x.arc(190, 52, 13, 0, Math.PI * 2); x.fill();
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  const pl = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85 }));
+  pl.position.z = 0.0165; g.add(pl);
   return g;
 }
 

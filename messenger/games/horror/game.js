@@ -150,12 +150,18 @@ function moveWithCollision(dx, dz) {
   if (!blocked(view.x, view.z + dz)) view.z += dz;
   return Math.hypot(view.x - x0, view.z - z0);
 }
-// Высота пола: лестница ступенчатая; уровень меняется только на концах лестницы.
 const ST = W.stairs;
-function floorAt(x, z) {
-  if (x >= ST.x0 && x <= ST.x1 && z >= ST.z0 && z <= ST.z1) {
-    if (z <= ST.z0 + 0.01) S.level = 1;
-    if (z >= ST.z1 - 0.01) S.level = 0;
+// Высота пола: лестница ступенчатая. Уровень меняется при пересечении концов лестницы
+// (по предыдущей z, поэтому быстрый шаг не перескакивает порог). S.pz — прошлая z.
+const UP_Z = ST.z0 + 0.4, DOWN_Z = ST.z1;
+function floorAt(x, z, pz = S.pz ?? z) {
+  const inX = x >= ST.x0 && x <= ST.x1;
+  if (inX) {
+    if (S.level === 0 && pz > UP_Z && z <= UP_Z) S.level = 1;        // поднялись на площадку
+    else if (S.level === 1 && pz < DOWN_Z && z >= DOWN_Z) S.level = 0; // спустились к входу
+  }
+  S.pz = z;
+  if (inX && z >= ST.z0 && z <= ST.z1) {
     const i = clamp(Math.floor((ST.z1 - z) / ST.run), 0, ST.n - 1);
     return (i + 1) * ST.rise;
   }
@@ -672,4 +678,5 @@ window.__horror = {
   setLevel(l) { S.level = l; },
   press(u) { if (u) { candidate = u; tryUse(); } },
   findUse(pred) { return W.uses.find(pred) || null; },
+  blocked, floorAt, tryUse, findCandidate, get candidate() { return candidate; }, camera,
 };

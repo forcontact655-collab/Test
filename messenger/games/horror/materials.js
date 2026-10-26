@@ -199,6 +199,7 @@ export const MAT = {
   puddle: plain({ color: 0x06080c, rough: 0.02, metal: 0.2, env: 1.5 }),
   rain: new THREE.MeshBasicMaterial({ color: 0xbcd2e6, transparent: true, opacity: 0.32, depthWrite: false }),
   ripple: new THREE.MeshBasicMaterial({ color: 0xc9dced, transparent: true, opacity: 0.22, depthWrite: false }),
+  mirror: new THREE.MeshStandardMaterial({ color: 0xc9ced4, metalness: 1, roughness: 0.04, envMapIntensity: 2.2 }),
   glowSprite: new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(glowC), color: 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
   cone: new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(coneC), transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
   wire: plain({ color: 0x0a0a0c, rough: 0.6 }),
