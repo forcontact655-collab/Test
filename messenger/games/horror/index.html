@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#020103">
+<title>Не оборачивайся</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: #020103; overflow: hidden; touch-action: none; overscroll-behavior: none; font-family: "Georgia", "Times New Roman", serif; color: #d9cfc2; user-select: none; -webkit-user-select: none; }
+  #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #touch { position: fixed; inset: 0; touch-action: none; z-index: 2; }
+  .hidden { display: none !important; }
+
+  /* вигнетка и зерно: сужают поле зрения, лишнего света не добавляют */
+  #vignette { position: fixed; inset: 0; pointer-events: none; z-index: 3;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 38%, rgba(0,0,0,.72) 100%); }
+
+  #crosshair { position: fixed; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%;
+    background: rgba(255,240,220,.35); z-index: 4; pointer-events: none; }
+
+  #hint { position: fixed; left: 50%; top: 56%; transform: translateX(-50%); z-index: 4; pointer-events: none;
+    font-size: 15px; letter-spacing: .04em; color: #efe4d4; opacity: 0; transition: opacity .25s;
+    text-shadow: 0 1px 6px #000; white-space: nowrap; }
+  #hint.on { opacity: .9; }
+
+  #sub { position: fixed; left: 50%; bottom: 14%; transform: translateX(-50%); width: min(88vw, 520px); z-index: 5;
+    text-align: center; font-size: 18px; line-height: 1.45; color: #e8dccb; text-shadow: 0 2px 8px #000;
+    opacity: 0; transition: opacity .6s; pointer-events: none; font-style: italic; }
+  #sub.on { opacity: 1; }
+
+  #bat { position: fixed; left: 16px; top: calc(env(safe-area-inset-top, 0px) + 16px); width: 74px; height: 12px; z-index: 5;
+    border: 1px solid rgba(230,220,200,.45); border-radius: 3px; padding: 2px; pointer-events: none; }
+  #bat > i { display: block; height: 100%; width: 100%; background: #d8c9a6; transform-origin: left center; transition: transform .3s; border-radius: 1px; }
+
+  #flash { position: fixed; right: 16px; top: calc(env(safe-area-inset-top, 0px) + 10px); width: 52px; height: 52px; z-index: 6;
+    border-radius: 50%; border: 1px solid rgba(230,220,200,.35); background: rgba(10,8,6,.55); color: #f1e6cf;
+    display: grid; place-items: center; padding: 0; cursor: pointer; }
+  #flash svg { width: 26px; height: 26px; }
+  #flash.off { opacity: .55; }
+  #flash.off::after { content: ""; position: absolute; width: 36px; height: 2px; background: #d9cfc2; transform: rotate(-45deg); }
+
+  #stick { position: fixed; width: 140px; height: 140px; border-radius: 50%; z-index: 5; pointer-events: none;
+    border: 1px solid rgba(230,220,200,.25); background: rgba(255,240,220,.04); opacity: 0; transition: opacity .15s; }
+  #stick.on { opacity: 1; }
+  #knob { position: absolute; left: 35px; top: 35px; width: 70px; height: 70px; border-radius: 50%;
+    background: rgba(255,240,220,.22); border: 1px solid rgba(255,240,220,.35); }
+
+  #fade { position: fixed; inset: 0; background: #000; opacity: 0; transition: opacity .8s; pointer-events: none; z-index: 7; }
+  #fade.on { opacity: 1; }
+
+  #card { position: fixed; inset: 0; z-index: 8; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.6); }
+  #card > div { max-width: 420px; background: #0c0a08; border: 1px solid #3a3129; padding: 22px 22px 18px; box-shadow: 0 0 40px #000; }
+  #card h3 { margin: 0 0 10px; font-weight: normal; font-size: 19px; color: #efe4d4; letter-spacing: .03em; }
+  #card p { margin: 0 0 12px; font-size: 16px; line-height: 1.55; color: #cfc3b2; }
+  #card small { display: block; text-align: right; font-size: 12px; color: #7d7165; font-family: system-ui, sans-serif; }
+
+  #intro { position: fixed; inset: 0; z-index: 9; display: flex; flex-direction: column; justify-content: center; align-items: center;
+    padding: 28px; text-align: center; background: radial-gradient(ellipse at center, #0b0907 0%, #020103 80%); }
+  #intro h1 { margin: 0 0 14px; font-weight: normal; font-size: 30px; letter-spacing: .05em; color: #efe4d4; }
+  #intro p { margin: 0 0 10px; max-width: 360px; font-size: 16px; line-height: 1.55; color: #bdb1a0; }
+  #intro .ctl { font-family: system-ui, sans-serif; font-size: 13px; color: #8c8073; margin-top: 16px; line-height: 1.6; }
+  #start, #again { margin-top: 26px; padding: 14px 36px; font: inherit; font-size: 17px; color: #efe4d4; background: transparent;
+    border: 1px solid #6c6052; border-radius: 2px; cursor: pointer; letter-spacing: .05em; }
+
+  #end { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; justify-content: center; align-items: center;
+    padding: 28px; text-align: center; background: #000; }
+  #end h2 { margin: 0 0 16px; font-weight: normal; font-size: 24px; color: #efe4d4; }
+  #end p { margin: 0; max-width: 360px; font-size: 16px; line-height: 1.6; color: #bdb1a0; }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<div id="vignette"></div>
+<div id="crosshair"></div>
+<div id="touch"></div>
+<div id="stick"><div id="knob"></div></div>
+<div id="hint"></div>
+<div id="sub"></div>
+<div id="bat"><i></i></div>
+<button id="flash" aria-label="Фонарь">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M8 3h8l1 5H7z"/><path d="M9 8v4h6V8"/><path d="M10 12v9h4v-9"/></svg>
+</button>
+<div id="card" class="hidden"><div><h3></h3><p></p><small>тап, чтобы закрыть</small></div></div>
+<div id="fade"></div>
+<div id="intro">
+  <h1>Не оборачивайся</h1>
+  <p>Ночь. Ты дома один, свет то гаснет, то возвращается. Телефон звонит без причины.</p>
+  <p>Фонарь садится. Батарейка нужна, но её надо найти.</p>
+  <div class="ctl">Левая половина экрана — ход (джойстик).<br>Правая половина — осмотр (свайп).<br>Короткий тап по предмету — действие.</div>
+  <button id="start">Начать</button>
+</div>
+<div id="end" class="hidden">
+  <h2>Конец эпизода</h2>
+  <p>Ты вышел. Свет за дверью был белым и тихим. Позади, в коридоре, что-то негромко поправило дверь.</p>
+  <button id="again" onclick="location.reload()">Ещё раз</button>
+</div>
+<script type="module" src="game.js"></script>
+</body>
+</html>
