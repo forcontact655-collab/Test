@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#140d26">
+  <meta name="description" content="Echo: мессенджер с личными чатами, группами, каналами, стикерами и статусами">
+  <title>Echo</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icon.png">
+  <link rel="apple-touch-icon" href="icon.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="boot" class="boot"><div class="boot-logo">E</div><div class="boot-text">Echo</div></div>
+
+  <section id="auth" class="auth hidden">
+    <div class="orb o1"></div><div class="orb o2"></div><div class="orb o3"></div>
+    <div class="auth-card">
+      <div class="auth-logo">E</div>
+      <h1 class="auth-title">Echo</h1>
+      <p class="auth-sub">Сообщения в реальном времени</p>
+      <button id="g-login" class="btn-google" type="button"><span class="g-mark">G</span>Войти через Google</button>
+      <p class="auth-note">Аккаунт создаётся сам при первом входе. Username можно указать позже.</p>
+    </div>
+  </section>
+
+  <div id="app" class="app hidden">
+    <div id="offline-bar" class="offline-bar hidden">Нет сети. Показаны сохранённые данные, текст отправится при связи.</div>
+    <aside id="side" class="side">
+      <header class="side-top">
+        <button id="me-btn" class="icon-btn avatar-btn" type="button" aria-label="Профиль"></button>
+        <div class="brand">Echo</div>
+        <button id="settings-btn" class="icon-btn" type="button" aria-label="Настройки"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+        <button id="new-btn" class="icon-btn" type="button" aria-label="Новый чат"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+      </header>
+      <label class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg><input id="search" type="search" placeholder="Поиск людей и сообщений" autocomplete="off"></label>
+      <nav id="tabs" class="tabs"></nav>
+      <div id="list" class="list"></div>
+    </aside>
+
+    <main id="main" class="main">
+      <div id="welcome" class="welcome">
+        <div class="welcome-card">
+          <div class="welcome-logo">G</div>
+          <div class="welcome-title">Выбери чат</div>
+          <div class="welcome-sub">или найди человека через поиск и начни переписку</div>
+        </div>
+      </div>
+
+      <section id="chat" class="chat hidden">
+        <header class="chat-head">
+          <button id="back-btn" class="icon-btn back" type="button" aria-label="Назад"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+          <button id="chat-open-info" class="chat-title-btn" type="button">
+            <span id="chat-av"></span>
+            <span class="chat-title-box">
+              <span id="chat-title" class="chat-title"></span>
+              <span id="chat-sub" class="chat-sub"></span>
+            </span>
+          </button>
+          <button id="chat-search-btn" class="icon-btn" type="button" aria-label="Поиск в чате"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg></button>
+          <button id="chat-menu-btn" class="icon-btn" type="button" aria-label="Меню чата"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
+        </header>
+
+        <div id="chat-search" class="chat-search hidden">
+          <input id="chat-search-input" type="search" placeholder="Поиск в этом чате" autocomplete="off">
+          <button id="chat-search-close" class="icon-btn" type="button" aria-label="Закрыть поиск"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        </div>
+
+        <div class="timeline-wrap">
+          <div id="timeline" class="timeline"></div>
+          <button id="down-btn" class="down-btn hidden" type="button" aria-label="Вниз"><svg viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button>
+        </div>
+
+        <div id="bars" class="bars"></div>
+        <div id="readonly" class="readonly hidden">В канале пишут только администраторы</div>
+        <div id="panel" class="panel hidden"></div>
+
+        <form id="composer" class="composer">
+          <button id="attach-btn" class="icon-btn" type="button" aria-label="Прикрепить фото или видео"><svg viewBox="0 0 24 24"><path d="M21 11l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/></svg></button>
+          <input id="picker" type="file" accept="image/*,video/*,audio/*" hidden>
+          <button id="sticker-btn" class="icon-btn" type="button" aria-label="Стикеры"><svg viewBox="0 0 24 24"><path d="M15 3H6a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h9l7-7V6a3 3 0 0 0-3-3z"/><path d="M15 21v-4a2 2 0 0 1 2-2h4"/></svg></button>
+          <div class="input-wrap">
+            <textarea id="input" rows="1" maxlength="4096" placeholder="Сообщение" autocomplete="off"></textarea>
+            <button id="smile-btn" class="icon-btn small" type="button" aria-label="Смайлы"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5c1 1.2 2 1.8 3.5 1.8s2.5-.6 3.5-1.8M9 9.5h.01M15 9.5h.01"/></svg></button>
+          </div>
+          <button id="send-btn" class="send-btn" type="submit" aria-label="Отправить"><svg viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-3-7z"/></svg></button>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <section id="profile-page" class="pp hidden" aria-label="Профиль">
+    <div id="pp-scroll" class="pp-scroll">
+      <div id="pp-hero" class="pp-hero"><div id="pp-av" class="pp-av"></div><div id="pp-over" class="pp-over"></div></div>
+      <div id="pp-body" class="pp-body"></div>
+    </div>
+    <header class="pp-top">
+      <button id="pp-back" class="icon-btn" type="button" aria-label="Назад"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <b id="pp-title" class="pp-title"></b>
+      <button id="pp-more" class="icon-btn" type="button" aria-label="Ещё"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
+    </header>
+    <audio id="pp-audio" loop preload="auto"></audio>
+  </section>
+
+  <section id="settings-page" class="sp hidden" aria-label="Настройки">
+    <header class="sp-top">
+      <button id="sp-back" class="icon-btn" type="button" aria-label="Назад"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <b id="sp-title" class="sp-title">Настройки</b>
+    </header>
+    <div id="sp-body" class="sp-body"></div>
+  </section>
+
+  <div id="ctx" class="ctx hidden"></div>
+
+  <div id="sheet" class="sheet hidden">
+    <div class="sheet-card">
+      <header class="sheet-head"><b id="sheet-title"></b><button id="sheet-x" class="icon-btn" type="button" aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
+      <div id="sheet-body" class="sheet-body"></div>
+    </div>
+  </div>
+
+  <div id="lightbox" class="lightbox hidden"></div>
+  <div id="toasts" class="toasts"></div>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="e2e.js"></script>
+  <script src="store.js"></script>
+  <script src="media.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
